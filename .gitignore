@@ -1,3 +1,3 @@
-/AppRun-patched
 /AppRun.c
-/AppRun.c.orig
+/AppRun_patched*
+*.o
