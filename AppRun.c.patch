@@ -1,6 +1,6 @@
 --- a/AppRun.c
 +++ b/AppRun.c
-@@ -44,6 +44,8 @@ THE SOFTWARE.
+@@ -44,6 +44,8 @@
  
  #define LINE_SIZE 255
  
@@ -9,15 +9,15 @@
  int filter(const struct dirent *dir) {
      char *p = (char*) &dir->d_name;
      p = strrchr(p, '.');
-@@ -156,6 +158,7 @@ int main(int argc, char *argv[]) {
+@@ -156,6 +158,7 @@
      char *old_env;
-     const LENGTH = 2047;
+     const int LENGTH = 2047;
      char new_env[8][LENGTH+1];
 +    char *optional = checkrt(usr_in_appdir);
  
      /* https://docs.python.org/2/using/cmdline.html#envvar-PYTHONHOME */
      snprintf(new_env[0], LENGTH, "PYTHONHOME=%s/usr/", appdir);
-@@ -165,7 +168,7 @@ int main(int argc, char *argv[]) {
+@@ -164,7 +167,7 @@
      snprintf(new_env[1], LENGTH, "PATH=%s/usr/bin/:%s/usr/sbin/:%s/usr/games/:%s/bin/:%s/sbin/:%s", appdir, appdir, appdir, appdir, appdir, old_env);
  
      old_env = getenv("LD_LIBRARY_PATH") ?: "";
