@@ -1,0 +1,22 @@
+language: c
+compiler: gcc
+
+services:
+  - docker
+ 
+env:
+  - ARCH=i686 DOCKER_IMAGE=toopher/centos-i386:centos6
+  - ARCH=x86_64 DOCKER_IMAGE=library/centos:6.8
+ 
+script:
+  - mkdir -p ./out/
+  - docker run -i -v ${PWD}/out:/out -v "${PWD}:/AppImageKit-checkrt" "$DOCKER_IMAGE" /bin/bash -c "cd /AppImageKit-checkrt ; yum -y install gcc wget make binutils glibc-devel patch ; make"
+  - cp /AppImageKit-checkrt/AppRun_patched out/AppRun-patched-${ARCH} ; ls -lh out/*
+  - wget -c https://github.com/probonopd/uploadtool/raw/master/upload.sh
+  - bash ./upload.sh out/*
+
+branches:
+  except:
+    - # Do not build tags that we create when we upload to GitHub Releases
+    - /^(?i:continuous)$/
+
