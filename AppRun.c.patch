@@ -11,18 +11,18 @@
      p = strrchr(p, '.');
 @@ -156,6 +158,7 @@
      char *old_env;
-     const int LENGTH = 2047;
-     char new_env[8][LENGTH+1];
+     const int length = 2047;
+     char new_env[8][length+1];
 +    char *optional = checkrt(usr_in_appdir);
  
      /* https://docs.python.org/2/using/cmdline.html#envvar-PYTHONHOME */
-     snprintf(new_env[0], LENGTH, "PYTHONHOME=%s/usr/", appdir);
+     snprintf(new_env[0], length, "PYTHONHOME=%s/usr/", appdir);
 @@ -164,7 +167,7 @@
-     snprintf(new_env[1], LENGTH, "PATH=%s/usr/bin/:%s/usr/sbin/:%s/usr/games/:%s/bin/:%s/sbin/:%s", appdir, appdir, appdir, appdir, appdir, old_env);
+     snprintf(new_env[1], length, "PATH=%s/usr/bin/:%s/usr/sbin/:%s/usr/games/:%s/bin/:%s/sbin/:%s", appdir, appdir, appdir, appdir, appdir, old_env);
  
      old_env = getenv("LD_LIBRARY_PATH") ?: "";
--    snprintf(new_env[2], LENGTH, "LD_LIBRARY_PATH=%s/usr/lib/:%s/usr/lib/i386-linux-gnu/:%s/usr/lib/x86_64-linux-gnu/:%s/usr/lib32/:%s/usr/lib64/:%s/lib/:%s/lib/i386-linux-gnu/:%s/lib/x86_64-linux-gnu/:%s/lib32/:%s/lib64/:%s", appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, old_env);
-+    snprintf(new_env[2], LENGTH, "LD_LIBRARY_PATH=%s%s/usr/lib/:%s/usr/lib/i386-linux-gnu/:%s/usr/lib/x86_64-linux-gnu/:%s/usr/lib32/:%s/usr/lib64/:%s/lib/:%s/lib/i386-linux-gnu/:%s/lib/x86_64-linux-gnu/:%s/lib32/:%s/lib64/:%s", optional, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, old_env);
+-    snprintf(new_env[2], length, "LD_LIBRARY_PATH=%s/usr/lib/:%s/usr/lib/i386-linux-gnu/:%s/usr/lib/x86_64-linux-gnu/:%s/usr/lib32/:%s/usr/lib64/:%s/lib/:%s/lib/i386-linux-gnu/:%s/lib/x86_64-linux-gnu/:%s/lib32/:%s/lib64/:%s", appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, old_env);
++    snprintf(new_env[2], length, "LD_LIBRARY_PATH=%s%s/usr/lib/:%s/usr/lib/i386-linux-gnu/:%s/usr/lib/x86_64-linux-gnu/:%s/usr/lib32/:%s/usr/lib64/:%s/lib/:%s/lib/i386-linux-gnu/:%s/lib/x86_64-linux-gnu/:%s/lib32/:%s/lib64/:%s", optional, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, old_env);
  
      old_env = getenv("PYTHONPATH") ?: "";
-     snprintf(new_env[3], LENGTH, "PYTHONPATH=%s/usr/share/pyshared/:%s", appdir, old_env);
+     snprintf(new_env[3], length, "PYTHONPATH=%s/usr/share/pyshared/:%s", appdir, old_env);
