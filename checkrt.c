@@ -44,10 +44,10 @@
 #define CXXDIR "optional/libstdc++"
 #define GCCDIR "optional/libgcc"
 
+char optional[1024];
 
-char *checkrt(char *usr_in_appdir)
+void checkrt(char *usr_in_appdir)
 {
-    char path[1024];
     int ret;
     FILE *f;
     char command[LINE_SIZE];
@@ -99,22 +99,14 @@ char *checkrt(char *usr_in_appdir)
     if (gcc_bundle_ver > gcc_sys_ver)
         bundle_gcc = 1;
 
-    char *tmp;
-
     if (bundle_cxx == 1 && bundle_gcc == 0) {
-        sprintf(path, "%s/" CXXDIR ":", usr_in_appdir);
-        strcpy(tmp, path);
-        return tmp;
+        sprintf(optional, "%s/" CXXDIR ":", usr_in_appdir);
     } else if (bundle_cxx == 0 && bundle_gcc == 1) {
-        sprintf(path, "%s/" GCCDIR ":", usr_in_appdir);
-        strcpy(tmp, path);
-        return tmp;
+        sprintf(optional, "%s/" GCCDIR ":", usr_in_appdir);
     } else if (bundle_cxx == 1 && bundle_gcc == 1) {
-        sprintf(path, "%s/" GCCDIR ":%s/" CXXDIR ":", usr_in_appdir, usr_in_appdir);
-        strcpy(tmp, path);
-        return tmp;
+        sprintf(optional, "%s/" GCCDIR ":%s/" CXXDIR ":", usr_in_appdir, usr_in_appdir);
+    } else {
+        sprintf(optional, "%s", "");
     }
-
-    return "";
 }
 

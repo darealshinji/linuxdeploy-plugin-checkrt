@@ -1,4 +1,5 @@
 CFLAGS ?= -O2 -Wall -Wextra
+CFLAGS += -include checkrt.h
 LDFLAGS += -s
 BIN = AppRun_patched
 
