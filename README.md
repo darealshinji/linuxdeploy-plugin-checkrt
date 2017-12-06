@@ -15,5 +15,5 @@ That's because both libraries are part of GCC.
 You would have to know the library version of the host system and decide whether to use a bundled library or not before the
 application is started. This is exactly what the patched AppRun binary does.
 It will search for `usr/optional/libstdc++/libstdc++.so.6` and `usr/optional/libgcc_s/libgcc_s.so.1` inside the AppImage or AppDir.
-If found it will compare their internal versions with the ones found on the system and prepend their paths to `LD_LIBRARY_PATH`
-if necessary.
+If found it will compare their internal versions with the ones found on the system and prepend their paths to `LD_LIBRARY_PATH` if necessary.
+You should also put `exec.so` into `usr/optional`.
