@@ -15,7 +15,7 @@ $(LIB): exec.o
 	$(CC) -shared $(LDFLAGS) -o $@ $^ -ldl
 
 AppRun_patched.o checkrt.o: CFLAGS += -include checkrt.h
-exec.o: CFLAGS += -fPIC
+exec.o: CFLAGS += -fPIC -std=c99
 
 AppRun_patched.c: AppRun.c
 	patch -p1 --output $@  < AppRun.c.patch
