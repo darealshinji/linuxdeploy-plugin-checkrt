@@ -103,8 +103,10 @@ void checkrt(char *usr_in_appdir)
         bundle_gcc = 1;
 
     if (bundle_cxx == 1 || bundle_gcc == 1) {
-        optional_ld_preload = malloc(strlen("LD_PRELOAD=") + strlen(EXEC_SO) + 1 + len);
+        len = strlen(EXEC_SO) + 12 + len;
+        optional_ld_preload = malloc(len);
         sprintf(optional_ld_preload, "LD_PRELOAD=%s/" EXEC_SO, usr_in_appdir);
+        optional_ld_preload[len] = '\0';
     }
 
     if (bundle_cxx == 1 && bundle_gcc == 0) {
