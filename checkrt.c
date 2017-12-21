@@ -41,14 +41,14 @@
   ret = fscanf(f, "%s", sym); (void)ret; \
   pclose(f);
 
-#define CXXDIR   "./optional/libstdc++"
-#define GCCDIR   "./optional/libgcc"
-#define EXEC_SO  "./optional/exec.so"
+#define CXXDIR   "optional/libstdc++"
+#define GCCDIR   "optional/libgcc"
+#define EXEC_SO  "optional/exec.so"
 
 char *optional = NULL;
 char *optional_ld_preload = NULL;
 
-void checkrt()
+void checkrt(char *usr_in_appdir)
 {
     int ret;
     FILE *f;
@@ -58,8 +58,8 @@ void checkrt()
     char stdcxx_bundle_sym[LINE_SIZE], gcc_bundle_sym[LINE_SIZE];
     int stdcxx_sys_ver=1, stdcxx_bundle_ver=0, gcc_sys_ver=1, gcc_bundle_ver=0;
 
-    char *stdcxx_bundle_lib = CXXDIR "/libstdc++.so.6";
-    char *gcc_bundle_lib = GCCDIR "/libgcc_s.so.1";
+    char *stdcxx_bundle_lib = "./" CXXDIR "/libstdc++.so.6";
+    char *gcc_bundle_lib = "./" GCCDIR "/libgcc_s.so.1";
     const char *format = "tr '\\0' '\\n' < '%s' | grep -e '%s' | tail -n1";
 
     if (access(stdcxx_bundle_lib, F_OK) == 0) {
@@ -94,6 +94,7 @@ void checkrt()
 
     int bundle_cxx = 0;
     int bundle_gcc = 0;
+    size_t len = strlen(usr_in_appdir);
 
     if (stdcxx_bundle_ver > stdcxx_sys_ver)
         bundle_cxx = 1;
@@ -102,22 +103,31 @@ void checkrt()
         bundle_gcc = 1;
 
     if (bundle_cxx == 1 || bundle_gcc == 1) {
-        optional_ld_preload = malloc(strlen(EXEC_SO) + 12);
-        sprintf(optional_ld_preload, "LD_PRELOAD=" EXEC_SO);
+        len = strlen(EXEC_SO) + 12 + len;
+        optional_ld_preload = malloc(len);
+        sprintf(optional_ld_preload, "LD_PRELOAD=%s/" EXEC_SO, usr_in_appdir);
+        optional_ld_preload[len] = '\0';
     }
 
     if (bundle_cxx == 1 && bundle_gcc == 0) {
-        optional = malloc(strlen(CXXDIR) + 2);
-        sprintf(optional, CXXDIR ":");
+        len = strlen(CXXDIR) + 2 + len;
+        optional = malloc(len);
+        sprintf(optional, "%s/" CXXDIR ":", usr_in_appdir);
     } else if (bundle_cxx == 0 && bundle_gcc == 1) {
-        optional = malloc(strlen(GCCDIR) + 2);
-        sprintf(optional, GCCDIR ":");
+        len = strlen(GCCDIR) + 2 + len;
+        optional = malloc(len);
+        sprintf(optional, "%s/" GCCDIR ":", usr_in_appdir);
     } else if (bundle_cxx == 1 && bundle_gcc == 1) {
-        optional = malloc(strlen(GCCDIR) + strlen(CXXDIR) + 3);
-        sprintf(optional, GCCDIR ":" CXXDIR ":");
+        len = strlen(GCCDIR) + strlen(CXXDIR) + 4 + len*2;
+        optional = malloc(len);
+        sprintf(optional, "%s/" GCCDIR ":%s/" CXXDIR ":", usr_in_appdir, usr_in_appdir);
     } else {
-        optional = malloc(1);
+        len = 1;
+        optional = malloc(len);
         sprintf(optional, "%s", "");
     }
+    optional[len] = '\0';
+
+    //printf("optional: %s\noptional_ld_preload: %s\n", optional, optional_ld_preload);
 }
 

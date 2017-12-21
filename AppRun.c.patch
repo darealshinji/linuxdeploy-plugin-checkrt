@@ -1,44 +1,30 @@
 --- a/AppRun.c
 +++ b/AppRun.c
-@@ -38,7 +38,7 @@
-         exit( 1 );                              \
-     } while (0);
- 
--#define NEW_LD_LIBRARY_PATH "LD_LIBRARY_PATH=./lib/:./lib/i386-linux-gnu/:./lib/x86_64-linux-gnu/:./lib32/:./lib64/:../lib/:../lib/i386-linux-gnu/:../lib/x86_64-linux-gnu/:../lib32/:../lib64/:%s"
-+#define NEW_LD_LIBRARY_PATH "LD_LIBRARY_PATH=%s./lib/:./lib/i386-linux-gnu/:./lib/x86_64-linux-gnu/:./lib32/:./lib64/:../lib/:../lib/i386-linux-gnu/:../lib/x86_64-linux-gnu/:../lib32/:../lib64/:%s"
- #define NEW_PATH "PATH=./bin/:./sbin/:./games/:../bin/:../sbin/:%s"
- #define NEW_PYTHONPATH "PYTHONPATH=./share/pyshared/:%s"
- #define NEW_XDG_DATA_DIRS "XDG_DATA_DIRS=./share/:%s"
-@@ -138,8 +138,8 @@
-     char *env, *new_env[7];
- 
-     env = getenv("LD_LIBRARY_PATH") ?: "";
--    new_env[0] = malloc( strlen(NEW_LD_LIBRARY_PATH) + strlen(env) );
--    sprintf( new_env[0], NEW_LD_LIBRARY_PATH, env );
-+    new_env[0] = malloc( strlen(NEW_LD_LIBRARY_PATH) + strlen(optional) + strlen(env) );
-+    sprintf( new_env[0], NEW_LD_LIBRARY_PATH, optional, env );
-     // printf( "  using %s\n", new_env[0] );
-     putenv( new_env[0] );
- 
-@@ -179,6 +179,11 @@
-     // printf( "  using %s\n", new_env[6] );
-     putenv( new_env[6] );    
- 
-+    checkrt();
+@@ -164,12 +164,16 @@
+     char *old_env;
+     size_t length;
+     const char *format;
++    checkrt(usr_in_appdir);
 +
 +    if (optional_ld_preload)
 +        putenv(optional_ld_preload);
-+
-     /* Run */
-     ret = execvp(executable, argv);
  
-@@ -187,6 +192,9 @@
-         die( "Error executing '%s'; return code: %d\n", executable, ret );
-     }
+     /* https://docs.python.org/2/using/cmdline.html#envvar-PYTHONHOME */
+     SET_NEW_ENV(new_pythonhome, appdir_s, "PYTHONHOME=%s/usr/", appdir);
+ 
+     old_env = getenv("PATH") ?: "";
+-    SET_NEW_ENV(new_path, appdir_s*5 + strlen(old_env), "PATH=%s/usr/bin/:%s/usr/sbin/:%s/usr/games/:%s/bin/:%s/sbin/:%s", appdir, appdir, appdir, appdir, appdir, old_env);
++    SET_NEW_ENV(new_path, appdir_s*5 + strlen(old_env), "PATH=%s%s/usr/bin/:%s/usr/sbin/:%s/usr/games/:%s/bin/:%s/sbin/:%s", optional, appdir, appdir, appdir, appdir, appdir, old_env);
+ 
+     old_env = getenv("LD_LIBRARY_PATH") ?: "";
+     SET_NEW_ENV(new_ld_library_path, appdir_s*10 + strlen(old_env), "LD_LIBRARY_PATH=%s/usr/lib/:%s/usr/lib/i386-linux-gnu/:%s/usr/lib/x86_64-linux-gnu/:%s/usr/lib32/:%s/usr/lib64/:%s/lib/:%s/lib/i386-linux-gnu/:%s/lib/x86_64-linux-gnu/:%s/lib32/:%s/lib64/:%s", appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, old_env);
+@@ -201,6 +205,9 @@
+     if (ret == -1)
+         die("Error executing '%s': %s\n", exe, strerror(error));
  
 +    free(optional);
 +    if (optional_ld_preload)
 +        free(optional_ld_preload);
-     free(new_env[6]);
-     free(new_env[5]);
-     free(new_env[4]);
+     free(line);
+     free(desktop_file);
+     free(usr_in_appdir);
