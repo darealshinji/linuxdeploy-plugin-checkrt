@@ -18,6 +18,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+#include "debug.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,7 +48,6 @@
 
 char *optional = NULL;
 char *optional_ld_preload = NULL;
-int debug_flag = 0;
 
 void checkrt(char *usr_in_appdir)
 {
@@ -62,8 +62,6 @@ void checkrt(char *usr_in_appdir)
     char *stdcxx_bundle_lib = "./" CXXDIR "/libstdc++.so.6";
     char *gcc_bundle_lib = "./" GCCDIR "/libgcc_s.so.1";
     const char *format = "tr '\\0' '\\n' < '%s' | grep -e '%s' | tail -n1";
-
-    debug_flag = getenv("APPIMAGE_CHECKRT_DEBUG") ? 1 : 0;
 
     if (access(stdcxx_bundle_lib, F_OK) == 0) {
         f = popen("ldconfig -p | grep 'libstdc++.so.6 (" LIBC6_ARCH ")' | awk 'NR==1{print $NF}'", "r");

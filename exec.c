@@ -42,7 +42,7 @@ variable (e.g. "PATH"):
 
 #define _GNU_SOURCE
 
-#include "checkrt.h"
+#include "debug.h"
 
 #include <unistd.h>
 #include <dlfcn.h>
