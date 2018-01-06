@@ -47,6 +47,7 @@
 
 char *optional = NULL;
 char *optional_ld_preload = NULL;
+int debug_flag = 0;
 
 void checkrt(char *usr_in_appdir)
 {
@@ -62,6 +63,8 @@ void checkrt(char *usr_in_appdir)
     char *gcc_bundle_lib = "./" GCCDIR "/libgcc_s.so.1";
     const char *format = "tr '\\0' '\\n' < '%s' | grep -e '%s' | tail -n1";
 
+    debug_flag = getenv("APPIMAGE_CHECKRT_DEBUG") ? 1 : 0;
+
     if (access(stdcxx_bundle_lib, F_OK) == 0) {
         f = popen("ldconfig -p | grep 'libstdc++.so.6 (" LIBC6_ARCH ")' | awk 'NR==1{print $NF}'", "r");
         ret = fscanf(f, "%s", stdcxx_sys_lib); (void)ret;
@@ -72,8 +75,8 @@ void checkrt(char *usr_in_appdir)
             SCANLIB(stdcxx_bundle_lib, stdcxx_bundle_sym, "^GLIBCXX_3\\.4");
             stdcxx_sys_ver = atoi(stdcxx_sys_sym+12);
             stdcxx_bundle_ver = atoi(stdcxx_bundle_sym+12);
-            //printf("%s ==> %s (%d)\n", stdcxx_sys_lib, stdcxx_sys_sym, stdcxx_sys_ver);
-            //printf("%s ==> %s (%d)\n\n", stdcxx_bundle_lib, stdcxx_bundle_sym, stdcxx_bundle_ver);
+            DEBUG("%s ==> %s (%d)\n", stdcxx_sys_lib, stdcxx_sys_sym, stdcxx_sys_ver);
+            DEBUG("%s ==> %s (%d)\n\n", stdcxx_bundle_lib, stdcxx_bundle_sym, stdcxx_bundle_ver);
         }
     }
 
@@ -87,8 +90,8 @@ void checkrt(char *usr_in_appdir)
             SCANLIB(gcc_bundle_lib, gcc_bundle_sym, "^GCC_[0-9]\\.[0-9]");
             gcc_sys_ver = atoi(gcc_sys_sym+4) * 100 + atoi(gcc_sys_sym+6) * 10 + atoi(gcc_sys_sym+8);
             gcc_bundle_ver = atoi(gcc_bundle_sym+4) * 100 + atoi(gcc_bundle_sym+6) * 10 + atoi(gcc_bundle_sym+8);
-            //printf("%s ==> %s (%d)\n", gcc_sys_lib, gcc_sys_sym, gcc_sys_ver);
-            //printf("%s ==> %s (%d)\n\n", gcc_bundle_lib, gcc_bundle_sym, gcc_bundle_ver);
+            DEBUG("%s ==> %s (%d)\n", gcc_sys_lib, gcc_sys_sym, gcc_sys_ver);
+            DEBUG("%s ==> %s (%d)\n\n", gcc_bundle_lib, gcc_bundle_sym, gcc_bundle_ver);
         }
     }
 
@@ -121,6 +124,6 @@ void checkrt(char *usr_in_appdir)
         sprintf(optional, "%s", "");
     }
 
-    //printf("optional: %s\noptional_ld_preload: %s\n", optional, optional_ld_preload);
+    DEBUG("optional: %s\noptional_ld_preload: %s\n", optional, optional_ld_preload);
 }
 
