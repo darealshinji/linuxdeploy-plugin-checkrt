@@ -5,7 +5,7 @@
 
 #define DEBUG(...) do { \
     if (getenv("APPIMAGE_CHECKRT_DEBUG")) \
-        printf(__VA_ARGS__); \
+        printf("APPIMAGE_CHECKRT>> " __VA_ARGS__); \
 } while (0)
 
 #endif // DEBUG_H
