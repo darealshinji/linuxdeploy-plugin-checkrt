@@ -46,7 +46,7 @@
 #define GCCDIR   "optional/libgcc"
 #define EXEC_SO  "optional/exec.so"
 
-char *optional = NULL;
+char *optional_ld_library_path = NULL;
 char *optional_ld_preload = NULL;
 
 void checkrt(char *usr_in_appdir)
@@ -111,19 +111,19 @@ void checkrt(char *usr_in_appdir)
     }
 
     if (bundle_cxx == 1 && bundle_gcc == 0) {
-        optional = malloc(strlen(CXXDIR) + 3 + len);
-        sprintf(optional, "%s/" CXXDIR ":", usr_in_appdir);
+        optional_ld_library_path = malloc(strlen(CXXDIR) + 3 + len);
+        sprintf(optional_ld_library_path, "%s/" CXXDIR ":", usr_in_appdir);
     } else if (bundle_cxx == 0 && bundle_gcc == 1) {
-        optional = malloc(strlen(GCCDIR) + 3 + len);
-        sprintf(optional, "%s/" GCCDIR ":", usr_in_appdir);
+        optional_ld_library_path = malloc(strlen(GCCDIR) + 3 + len);
+        sprintf(optional_ld_library_path, "%s/" GCCDIR ":", usr_in_appdir);
     } else if (bundle_cxx == 1 && bundle_gcc == 1) {
-        optional = malloc(strlen(GCCDIR) + strlen(CXXDIR) + 5 + len*2);
-        sprintf(optional, "%s/" GCCDIR ":%s/" CXXDIR ":", usr_in_appdir, usr_in_appdir);
+        optional_ld_library_path = malloc(strlen(GCCDIR) + strlen(CXXDIR) + 5 + len*2);
+        sprintf(optional_ld_library_path, "%s/" GCCDIR ":%s/" CXXDIR ":", usr_in_appdir, usr_in_appdir);
     } else {
-        optional = malloc(2);
-        sprintf(optional, "%s", "");
+        optional_ld_library_path = malloc(2);
+        sprintf(optional_ld_library_path, "%s", "");
     }
 
-    DEBUG("optional: %s\noptional_ld_preload: %s\n", optional, optional_ld_preload);
+    DEBUG("optional_ld_library_path: %s\noptional_ld_preload: %s\n", optional_ld_library_path, optional_ld_preload);
 }
 
