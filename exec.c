@@ -283,7 +283,7 @@ int execve(const char* filename, char* const argv[], char* const envp[]) {
     old_execve = dlsym(RTLD_NEXT, "execve");
     int ret = old_execve(filename, argv, new_envp);
     stringlist_free(new_envp);
-    DEBUG(">>> custom execve()!\n");
+    DEBUG("custom execve()!\n");
     return ret;
 }
 
@@ -292,7 +292,7 @@ int execv(const char* filename, char* const argv[]) {
     old_execve = dlsym(RTLD_NEXT, "execve");
     int ret = old_execve(filename, argv, new_envp);
     stringlist_free(new_envp);
-    DEBUG(">>> custom execv()!\n");
+    DEBUG("custom execv()!\n");
     return ret;
 }
 
@@ -302,7 +302,7 @@ int execvpe(const char* filename, char* const argv[], char* const envp[]) {
     old_execvpe = dlsym(RTLD_NEXT, "execvpe");
     int ret = old_execvpe(filename, argv, new_envp);
     stringlist_free(new_envp);
-    DEBUG(">>> custom execvpe()!\n");
+    DEBUG("custom execvpe()!\n");
     return ret;
 }
 
@@ -312,6 +312,6 @@ int execvp(const char* filename, char* const argv[]) {
     old_execvpe = dlsym(RTLD_NEXT, "execvpe");
     int ret = old_execvpe(filename, argv, new_envp);
     stringlist_free(new_envp);
-    DEBUG(">>> custom execvp()!\n");
+    DEBUG("custom execvp()!\n");
     return ret;
 }
