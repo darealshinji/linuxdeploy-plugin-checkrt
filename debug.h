@@ -2,6 +2,7 @@
 #define DEBUG_H
 
 #include <stdlib.h>
+#include <stdio.h>
 
 #define DEBUG(...) do { \
     if (getenv("APPIMAGE_CHECKRT_DEBUG")) \
