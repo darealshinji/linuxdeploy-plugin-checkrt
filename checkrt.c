@@ -103,12 +103,18 @@ void checkrt(char *usr_in_appdir)
     if (gcc_bundle_ver > gcc_sys_ver)
         bundle_gcc = 1;
 
-    if (bundle_cxx == 1 || bundle_gcc == 1) {
+    char *exec_file = malloc(strlen(usr_in_appdir) + 1 + strlen(EXEC_SO) + 1);
+    sprintf(exec_file, "%s/%s", usr_in_appdir, EXEC_SO);
+    f = fopen(exec_file, "r");
+    if (f) {
         char *old_ld_preload = getenv("LD_PRELOAD");
         optional_ld_preload = malloc(strlen(EXEC_SO) + (old_ld_preload ? 1+strlen(old_ld_preload) : 0) + 13 + len);
-        sprintf(optional_ld_preload, "LD_PRELOAD=%s/" EXEC_SO "%s%s", usr_in_appdir,
+        sprintf(optional_ld_preload, "LD_PRELOAD=%s%s%s", exec_file,
                 old_ld_preload ? ":" : "", old_ld_preload ? old_ld_preload : "");
+        DEBUG("optional_ld_preload: %s\n", optional_ld_preload);
+        fclose(f);
     }
+    free(exec_file);
 
     if (bundle_cxx == 1 && bundle_gcc == 0) {
         optional_ld_library_path = malloc(strlen(CXXDIR) + 3 + len);
@@ -124,6 +130,6 @@ void checkrt(char *usr_in_appdir)
         sprintf(optional_ld_library_path, "%s", "");
     }
 
-    DEBUG("optional_ld_library_path: %s\noptional_ld_preload: %s\n", optional_ld_library_path, optional_ld_preload);
+    DEBUG("optional_ld_library_path: %s\n", optional_ld_library_path);
 }
 
