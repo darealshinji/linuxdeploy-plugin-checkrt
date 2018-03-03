@@ -1,4 +1,4 @@
-/* Copyright (c) 2017 djcj <djcj@gmx.de>
+/* Copyright (c) 2017-2018 djcj <djcj@gmx.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,7 +64,7 @@ void checkrt(char *usr_in_appdir)
     const char *format = "tr '\\0' '\\n' < '%s' | grep -e '%s' | tail -n1";
 
     if (access(stdcxx_bundle_lib, F_OK) == 0) {
-        f = popen("ldconfig -p | grep 'libstdc++.so.6 (" LIBC6_ARCH ")' | awk 'NR==1{print $NF}'", "r");
+        f = popen("PATH=\"/sbin:$PATH\" ldconfig -p | grep 'libstdc++.so.6 (" LIBC6_ARCH ")' | awk 'NR==1{print $NF}'", "r");
         ret = fscanf(f, "%s", stdcxx_sys_lib); (void)ret;
         pclose(f);
 
@@ -79,7 +79,7 @@ void checkrt(char *usr_in_appdir)
     }
 
     if (access(gcc_bundle_lib, F_OK) == 0) {
-        f = popen("ldconfig -p | grep 'libgcc_s.so.1 (" LIBC6_ARCH ")' | awk 'NR==1{print $NF}'", "r");
+        f = popen("PATH=\"/sbin:$PATH\" ldconfig -p | grep 'libgcc_s.so.1 (" LIBC6_ARCH ")' | awk 'NR==1{print $NF}'", "r");
         ret = fscanf(f, "%s", gcc_sys_lib); (void)ret;
         pclose(f);
 
