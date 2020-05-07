@@ -43,6 +43,21 @@ void env_free(char* const *env) {
     free((char**)env);
 }
 
+pid_t get_parent_pid() {
+    pid_t ppid = 0;
+    char *s_ppid = getenv("PPID");
+
+    if(s_ppid) {
+        ppid = atoi(s_ppid);
+    }
+
+    if (!ppid) {
+        ppid = getppid();
+    }
+
+    return ppid;
+}
+
 static size_t get_number_of_variables(FILE *file, char **buffer, size_t *len) {
     size_t number = 0;
 
@@ -103,7 +118,7 @@ static char* const* read_env_from_process(pid_t pid) {
 }
 
 char* const* read_parent_env() {
-    pid_t ppid = getppid();
+    pid_t ppid = get_parent_pid();
     return read_env_from_process(ppid);
 }
 
