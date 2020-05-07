@@ -38,6 +38,6 @@ AppRun_patched.c: AppRun.c
 	patch -p1 --output $@  < AppRun.c.patch
 
 AppRun.c:
-	wget -c "https://raw.githubusercontent.com/AppImage/AppImageKit/appimagetool/master/src/AppRun.c"
+	wget -c "https://raw.githubusercontent.com/AppImage/AppImageKit/master/src/AppRun.c"
 
 .PHONY: checkrt test run_tests all clean
