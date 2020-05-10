@@ -1,32 +1,98 @@
 --- a/AppRun.c
 +++ b/AppRun.c
-@@ -164,6 +164,10 @@
-     char *old_env;
+@@ -32,6 +32,7 @@
+ #include <dirent.h>
+ #include <string.h>
+ #include <errno.h>
++#include <wait.h>
+ 
+ #define die(...)                                    \
+     do {                                            \
+@@ -102,6 +103,11 @@
+             line[n] = '\0';
+     }
+ 
++    int pid;
++    if ((pid = fork()) == -1) {
++        int error = errno;
++        die("fork() failed: %s\n", strerror(error));
++    } else if (pid == 0) {
+     // count arguments
+     char*   arg         = exe;
+     int     argcount    = 0;
+@@ -165,6 +171,11 @@
      size_t length;
      const char *format;
+ 
 +    checkrt(usr_in_appdir);
 +
 +    if (optional_ld_preload)
 +        putenv(optional_ld_preload);
- 
++
      /* https://docs.python.org/2/using/cmdline.html#envvar-PYTHONHOME */
      SET_NEW_ENV(new_pythonhome, appdir_s, "PYTHONHOME=%s/usr/", appdir);
-@@ -172,7 +176,7 @@
+ 
+@@ -172,7 +183,7 @@
      SET_NEW_ENV(new_path, appdir_s*5 + strlen(old_env), "PATH=%s/usr/bin/:%s/usr/sbin/:%s/usr/games/:%s/bin/:%s/sbin/:%s", appdir, appdir, appdir, appdir, appdir, old_env);
  
      old_env = getenv("LD_LIBRARY_PATH") ?: "";
 -    SET_NEW_ENV(new_ld_library_path, appdir_s*10 + strlen(old_env), "LD_LIBRARY_PATH=%s/usr/lib/:%s/usr/lib/i386-linux-gnu/:%s/usr/lib/x86_64-linux-gnu/:%s/usr/lib32/:%s/usr/lib64/:%s/lib/:%s/lib/i386-linux-gnu/:%s/lib/x86_64-linux-gnu/:%s/lib32/:%s/lib64/:%s", appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, old_env);
 +    SET_NEW_ENV(new_ld_library_path, strlen(optional_ld_library_path) + appdir_s*10 + strlen(old_env), "LD_LIBRARY_PATH=%s%s/usr/lib/:%s/usr/lib/i386-linux-gnu/:%s/usr/lib/x86_64-linux-gnu/:%s/usr/lib32/:%s/usr/lib64/:%s/lib/:%s/lib/i386-linux-gnu/:%s/lib/x86_64-linux-gnu/:%s/lib32/:%s/lib64/:%s", optional_ld_library_path, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, appdir, old_env);
-
+ 
      old_env = getenv("PYTHONPATH") ?: "";
      SET_NEW_ENV(new_pythonpath, appdir_s + strlen(old_env), "PYTHONPATH=%s/usr/share/pyshared/:%s", appdir, old_env);
-@@ -201,6 +205,9 @@
-     if (ret == -1)
-         die("Error executing '%s': %s\n", exe, strerror(error));
-
+@@ -196,16 +207,29 @@
+     /* Otherwise may get errors because Python cannot write __pycache__ bytecode cache */
+     putenv("PYTHONDONTWRITEBYTECODE=1");
+ 
+-    /* Run */
+-    ret = execvp(exe, outargptrs);
++    /* Set pid & ppid */
++    pid_t pid = getpid();
++    pid_t ppid = getppid();
+ 
+-    int error = errno;
++    int pid_len = snprintf(NULL, 0, "%d", pid);
++    int ppid_len = snprintf(NULL, 0, "%d", ppid);
+ 
+-    if (ret == -1)
+-        die("Error executing '%s': %s\n", exe, strerror(error));
++    char *s_pid = malloc(pid_len + 1);
++    snprintf(s_pid, pid_len + 1, "%d", pid);
++
++    char *s_ppid = malloc(ppid_len + 1);
++    snprintf(s_ppid, ppid_len + 1, "%d", ppid);
++
++    setenv("PID", s_pid, 1);
++    setenv("PPID", s_ppid, 1);
++
++    /* Run */
++    execvp(exe, outargptrs);
++
 +    free(optional_ld_library_path);
 +    if (optional_ld_preload)
 +        free(optional_ld_preload);
-     free(line);
-     free(desktop_file);
+ 
+-    free(line);
+-    free(desktop_file);
      free(usr_in_appdir);
+     free(new_pythonhome);
+     free(new_path);
+@@ -215,5 +239,16 @@
+     free(new_perllib);
+     free(new_gsettings_schema_dir);
+     free(new_qt_plugin_path);
+-    return 0;
++
++    int error = errno;
++    die("Error executing '%s': %s\n", exe, strerror(error));
++    }
++
++    int status = 0;
++    int rv = waitpid(pid, &status, 0);
++    status = rv > 0 && WIFEXITED (status) ? WEXITSTATUS (status) : 1;
++
++    free(line);
++    free(desktop_file);
++    return status;
+ }

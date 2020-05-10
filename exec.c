@@ -79,12 +79,12 @@ static int exec_common(execve_func_t function, const char *filename, char* const
     DEBUG("filename %s, fullpath %s\n", filename, fullpath);
     char* const *env = envp;
     if (is_external_process(fullpath)) {
-        DEBUG("External process detected. Restoring env vars from parent %d\n", getppid());
+        DEBUG("External process detected. Restoring env vars from parent %d\n", get_parent_pid());
         env = read_parent_env();
-        if (!env)
+        if (!env) {
             env = envp;
-        else
             DEBUG("Error restoring env vars from parent\n");
+        }
     }
     int ret = function(filename, argv, env);
 
