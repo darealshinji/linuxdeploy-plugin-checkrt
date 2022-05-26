@@ -61,7 +61,7 @@ void checkrt(char *usr_in_appdir)
 
     char *stdcxx_bundle_lib = "./" CXXDIR "/libstdc++.so.6";
     char *gcc_bundle_lib = "./" GCCDIR "/libgcc_s.so.1";
-    const char *format = "tr '\\0' '\\n' < '%s' | grep -e '%s' | tail -n1";
+    const char *format = "tr '\\0' '\\n' < '%s' | grep -e '%s' | sort -V | tail -n1";
 
     if (access(stdcxx_bundle_lib, F_OK) == 0) {
         f = popen("PATH=\"/sbin:$PATH\" ldconfig -p | grep 'libstdc++.so.6 (" LIBC6_ARCH ")' | awk 'NR==1{print $NF}'", "r");
