@@ -1,7 +1,6 @@
 #!/bin/sh -e
 
 # A shell script that does the same as the binaries in the release section.
-# It's only here as an example on how to achieve it with a Shell script.
 
 cd "$(dirname "$0")"
 
