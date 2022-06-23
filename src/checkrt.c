@@ -57,14 +57,19 @@
 #define PRINT_VERBOSE(FMT, ...)  if (verbose) { fprintf(stderr, FMT, __VA_ARGS__); }
 
 
-static char *get_libname(const char *lib, char verbose)
+static char *get_libpath(const char *lib, char verbose)
 {
   struct link_map *map = NULL;
   char *path;
 
-  void *handle = dlopen(lib, RTLD_LAZY);
+  /* It's very important to use dlmopen() together with the argument LM_ID_NEWLM,
+   * otherwise the bundled library and the system library will use the same
+   * namespace and the path of the bundled library might be returned when you
+   * expected the system one.
+   */
+  void *handle = dlmopen(LM_ID_NEWLM, lib, RTLD_LAZY);
   if (!handle) {
-    PRINT_VERBOSE("error: failed to dlopen() file: %s\n", lib);
+    PRINT_VERBOSE("error: failed to dlmopen() file: %s\n", lib);
     return NULL;
   }
 
@@ -87,7 +92,7 @@ static int symbol_version(const char *lib, const char *symbol, char verbose)
   const char *error = "";
 
   /* let dlopen() do all the compatibility checks */
-  char *orig = get_libname(lib, verbose);
+  char *orig = get_libpath(lib, verbose);
   if (!orig) return -1;
 
   fd = open(orig, O_RDONLY);
@@ -97,7 +102,14 @@ static int symbol_version(const char *lib, const char *symbol, char verbose)
     return -1;
   }
 
-  PRINT_VERBOSE("%s\n", orig);
+  if (verbose) {
+    if (strcmp(lib, orig) == 0) {
+      fprintf(stderr, "%s\n", orig);
+    } else {
+      fprintf(stderr, "%s -> %s\n", lib, orig);
+    }
+  }
+
   free(orig);
 
   /* make sure file size is larger than the required ELF header size */
@@ -236,7 +248,7 @@ static int copy_lib(const char *lib, const char *destDir, char verbose)
   int fdIn = -1, fdOut = -1;
 
   /* get full source and target paths */
-  char *srcFull = get_libname(lib, verbose);
+  char *srcFull = get_libpath(lib, verbose);
   if (!srcFull) goto copy_lib_error;
 
   char *base = basename(srcFull);
@@ -300,13 +312,17 @@ int main(int argc, char **argv)
 {
 #if CHECKRT_TEST == 1
 
-  printf("Test:\n");
+  printf("Test:\n\n");
   copy_lib(LIBGCC_S_SO, "./" LIBGCC_DIR, 1);
   copy_lib(LIBSTDCXX_SO, "./" STDCXX_DIR, 1);
-  symbol_version(LIBGCC_S_SO, "GCC_", 1);
-  symbol_version(LIBSTDCXX_SO, "GLIBCXX_", 1);
+  putchar('\n');
   symbol_version("./" LIBGCC_DIR "/" LIBGCC_S_SO, "GCC_", 1);
+  putchar('\n');
   symbol_version("./" STDCXX_DIR "/" LIBSTDCXX_SO, "GLIBCXX_", 1);
+  putchar('\n');
+  symbol_version(LIBGCC_S_SO, "GCC_", 1);
+  putchar('\n');
+  symbol_version(LIBSTDCXX_SO, "GLIBCXX_", 1);
 
 #else
 
@@ -351,7 +367,6 @@ int main(int argc, char **argv)
   }
   *(p+1) = 0;
 
-  int ver;
   size_t len = strlen(currdir);
   char *libpath = malloc(len + MAX(sizeof(STDCXX_DIR), sizeof(LIBGCC_DIR)) +
     MAX(sizeof(LIBSTDCXX_SO), sizeof(LIBGCC_S_SO)) + 2);
@@ -366,8 +381,9 @@ int main(int argc, char **argv)
     copy_lib(LIBSTDCXX_SO, libpath, v);
   } else {
     /* get symbol versions */
+
     strcpy(p, LIBGCC_DIR "/" LIBGCC_S_SO);
-    ver = symbol_version(libpath, "GCC_", v);
+    int ver = symbol_version(libpath, "GCC_", v);
     if (ver != -1 && ver > symbol_version(LIBGCC_S_SO, "GCC_", v)) {
       printf("%s" LIBGCC_DIR ":", currdir);
     }

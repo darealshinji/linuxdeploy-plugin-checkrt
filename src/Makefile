@@ -42,10 +42,11 @@ $(EXEC_TEST): exec.c env.o
 $(ENV_TEST): env.c
 	$(CC) -o $@ $(CFLAGS) -DENV_TEST $^
 
-run_tests: $(EXEC_TEST) $(ENV_TEST) $(CHECKRT_TEST)
+run_tests: $(BIN) $(EXEC_TEST) $(ENV_TEST) $(CHECKRT_TEST)
 	./$(ENV_TEST)
 	./$(EXEC_TEST)
 	./$(CHECKRT_TEST)
+	./patch_libs.sh && ./$(BIN) -v
 
 .PHONY: $(BIN) all clean
 
