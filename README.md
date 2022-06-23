@@ -18,14 +18,15 @@ part of GCC.
 You would have to know the library version of the host system and decide whether
 to use a bundled library or not before the application is started. This is
 exactly what the `checkrt` tool does. It will search for a bundled `libstdc++.so.6`
-and `libgcc_s.so.1` library inside the AppImage or AppDir. If found it will
-compare their internal versions with the ones found on the system (using dlopen())
-and prepend their paths to `LD_LIBRARY_PATH` if necessary.
+and `libgcc_s.so.1` library inside sub-directories next to it. If found it will
+compare their internal versions with the ones found on the system and return a
+path that can be prepended to `LD_LIBRARY_PATH`.
 
 
 # Usage
 
-Compile with `make -C src`. Inside your AppDir create the directory `usr/optional/`
+Compile by running `make` inside the `src` directory.
+Inside your AppDir create the directory `usr/optional/`
 and put the binary `checkrt` inside there. Execute `usr/optional/checkrt --copy-libraries`
 to bundle your system's `libstdc++.so.6` and `libgcc_s.so.1` libraries.
 Use the provided AppRun script or write/modify your own. `checkrt` will either
