@@ -1,0 +1,11 @@
+*.o
+*.so
+*.gz
+
+src/*_test
+src/checkrt
+src/res.h
+
+src/cxx/
+src/gcc/
+
