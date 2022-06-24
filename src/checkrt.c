@@ -85,7 +85,7 @@ static char *get_libpath(const char *lib, char verbose)
   return path;
 }
 
-static int symbol_version(const char *lib, const char *symbol, char verbose)
+static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
 {
   int fd = -1;
   void *addr = NULL;
@@ -164,9 +164,10 @@ static int symbol_version(const char *lib, const char *symbol, char verbose)
     }
   }
 
+  const char *symbol = NULL;
+  size_t len = strlen(sym_prefix);
+
   /* iterate through sections */
-  size_t len = strlen(symbol);
-  int maj = 0, min = 0, pat = 0;
   for (int i = 0; i < shnum; ++i) {
     if (shdr[i].sh_type != SHT_SYMTAB && shdr[i].sh_type != SHT_DYNSYM) {
       continue;
@@ -183,46 +184,34 @@ static int symbol_version(const char *lib, const char *symbol, char verbose)
         continue;
       }
 
-      const char *symbol_name;
+      const char *name;
       if (shdr[i].sh_type == SHT_DYNSYM) {
-        symbol_name = sh_dynstr_p + syms_data[j].st_name;
+        name = sh_dynstr_p + syms_data[j].st_name;
       } else {
-        symbol_name = sh_strtab_p + syms_data[j].st_name;
+        name = sh_strtab_p + syms_data[j].st_name;
       }
 
-      if (strncmp(symbol_name, symbol, len) != 0) {
-        continue;
-      }
-
-      int tmp_maj = 0, tmp_min = 0, tmp_pat = 0;
-      if (sscanf(symbol_name + len, "%d.%d.%d", &tmp_maj, &tmp_min, &tmp_pat) < 1) {
+      if (strncmp(name, sym_prefix, len) != 0) {
         continue;
       }
 
-      if (tmp_maj < maj) {
-        continue;
-      } else if (tmp_maj > maj) {
-        maj = tmp_maj;
-        min = tmp_min;
-        pat = tmp_pat;
+      if (!symbol) {
+        symbol = name;
         continue;
       }
 
-      if (tmp_min < min) {
-        continue;
-      } else if (tmp_min > min) {
-        min = tmp_min;
-        pat = tmp_pat;
-        continue;
-      }
-
-      if (tmp_pat > pat) {
-        pat = tmp_pat;
+      if (strverscmp(name, symbol) > 0) {
+        symbol = name;
       }
     }
   }
 
-  PRINT_VERBOSE("%s%d.%d.%d\n", symbol, maj, min, pat);
+  int maj = 0, min = 0, pat = 0;
+  if (sscanf(symbol + len, "%d.%d.%d", &maj, &min, &pat) < 1) {
+    goto symbol_version_error;
+  }
+
+  PRINT_VERBOSE("%s%d.%d.%d\n", sym_prefix, maj, min, pat);
   munmap(addr, st.st_size);
   close(fd);
   return (pat + min*1000 + maj*1000000);
