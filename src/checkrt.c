@@ -1,4 +1,4 @@
-/* Copyright (c) 2022 <djcj@gmx.de>
+/* Copyright (c) 2022-2023 <djcj@gmx.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -227,8 +227,9 @@ static void dump_file(const char *dest, unsigned char *data, unsigned int len)
 {
   int fd = creat(dest, DEFFILEMODE);
   if (fd == -1) return;
-  if (write(fd, data, len) != len) unlink(dest);
+  ssize_t written = write(fd, data, len);
   close(fd);
+  if (written != len) unlink(dest);
 }
 
 static int copy_lib(const char *lib, const char *destDir, char verbose)
@@ -392,6 +393,3 @@ int main(int argc, char **argv)
 
   return 0;
 }
-
-
-
