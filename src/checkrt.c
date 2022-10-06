@@ -154,13 +154,13 @@ static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
         goto symbol_version_error;
       }
       sh_strtab_p = addr + shdr[i].sh_offset;
-      break;
+      //break;
     } else if (strcmp(name, ".dynstr") == 0) {
       if (shdr[i].sh_offset > st.st_size) {
         goto symbol_version_error;
       }
       sh_dynstr_p = addr + shdr[i].sh_offset;
-      break;
+      //break;
     }
   }
 
