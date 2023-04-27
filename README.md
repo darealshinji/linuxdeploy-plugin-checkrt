@@ -44,8 +44,7 @@ running the web browser.
 The intended usage is as follows:
 
 1. This library is injected to the dynamic loader through LD_PRELOAD
-   automatically in AppRun **only** if `usr/optional/exec.so` exists: 
-   e.g `LD_PRELOAD=$APPDIR/usr/optional/exec.so My.AppImage`
+   automatically in AppRun **only** if `usr/optional/exec.so` exists.
 
 2. This library will intercept calls to new processes and will detect whether
    those calls are for binaries within the AppImage bundle or external ones.

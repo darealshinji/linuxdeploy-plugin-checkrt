@@ -39,13 +39,13 @@
 #include "res.h"
 
 #ifdef __x86_64__
-  typedef Elf64_Ehdr  Elf_Ehdr;
-  typedef Elf64_Shdr  Elf_Shdr;
-  typedef Elf64_Sym   Elf_Sym;
+typedef Elf64_Ehdr  Elf_Ehdr;
+typedef Elf64_Shdr  Elf_Shdr;
+typedef Elf64_Sym   Elf_Sym;
 #else
-  typedef Elf32_Ehdr  Elf_Ehdr;
-  typedef Elf32_Shdr  Elf_Shdr;
-  typedef Elf32_Sym   Elf_Sym;
+typedef Elf32_Ehdr  Elf_Ehdr;
+typedef Elf32_Shdr  Elf_Shdr;
+typedef Elf32_Sym   Elf_Sym;
 #endif
 
 #define LIBGCC_S_SO  "libgcc_s.so.1"
@@ -66,6 +66,10 @@ static char *get_libpath(const char *lib, char verbose)
    * otherwise the bundled library and the system library will use the same
    * namespace and the path of the bundled library might be returned when you
    * expected the system one.
+   *
+   * Note: if dlmopen() gets stuck in a loop that's a bug in glibc which was
+   * fixed in release 2.37
+   * https://sourceware.org/bugzilla/show_bug.cgi?id=29600
    */
   void *handle = dlmopen(LM_ID_NEWLM, lib, RTLD_LAZY);
   if (!handle) {
@@ -154,13 +158,11 @@ static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
         goto symbol_version_error;
       }
       sh_strtab_p = addr + shdr[i].sh_offset;
-      //break;
     } else if (strcmp(name, ".dynstr") == 0) {
       if (shdr[i].sh_offset > st.st_size) {
         goto symbol_version_error;
       }
       sh_dynstr_p = addr + shdr[i].sh_offset;
-      //break;
     }
   }
 
