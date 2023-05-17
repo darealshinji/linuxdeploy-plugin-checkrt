@@ -36,8 +36,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "res.h"
-
 #ifdef __x86_64__
 typedef Elf64_Ehdr  Elf_Ehdr;
 typedef Elf64_Shdr  Elf_Shdr;
@@ -95,6 +93,12 @@ static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
   void *addr = NULL;
   const char *error = "";
 
+#define SYMBOL_VERSION_ERR \
+  PRINT_VERBOSE("error: %s: %s\n", error, orig); \
+  munmap(addr, st.st_size); \
+  close(fd); \
+  return -1;
+
   /* let dlopen() do all the compatibility checks */
   char *orig = get_libpath(lib, verbose);
   if (!orig) return -1;
@@ -120,21 +124,21 @@ static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
   struct stat st;
   if (fstat(fd, &st) < 0 || st.st_size < sizeof(Elf_Ehdr)) {
     error = "fstat() failed or returned a too low file size";
-    goto symbol_version_error;
+    SYMBOL_VERSION_ERR;
   }
 
   /* mmap() library */
   addr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
   if (addr == MAP_FAILED) {
     error = "mmap() failed";
-    goto symbol_version_error;
+    SYMBOL_VERSION_ERR;
   }
 
   /* ELF header */
   Elf_Ehdr *ehdr = addr;
   error = "offset exceeding filesize";
   if (ehdr->e_shoff > st.st_size) {
-    goto symbol_version_error;
+    SYMBOL_VERSION_ERR;
   }
 
   Elf_Shdr *shdr = addr + ehdr->e_shoff;
@@ -142,7 +146,7 @@ static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
   Elf_Shdr *sh_strtab = &shdr[ehdr->e_shstrndx];
 
   if (sh_strtab->sh_offset > st.st_size) {
-    goto symbol_version_error;
+    SYMBOL_VERSION_ERR;
   }
   const char *sh_strtab_p = addr + sh_strtab->sh_offset;
   const char *sh_dynstr_p = sh_strtab_p;
@@ -155,12 +159,12 @@ static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
 
     if (strcmp(name, ".strtab") == 0) {
       if (shdr[i].sh_offset > st.st_size) {
-        goto symbol_version_error;
+        SYMBOL_VERSION_ERR;
       }
       sh_strtab_p = addr + shdr[i].sh_offset;
     } else if (strcmp(name, ".dynstr") == 0) {
       if (shdr[i].sh_offset > st.st_size) {
-        goto symbol_version_error;
+        SYMBOL_VERSION_ERR;
       }
       sh_dynstr_p = addr + shdr[i].sh_offset;
     }
@@ -176,7 +180,7 @@ static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
     }
 
     if (shdr[i].sh_offset > st.st_size) {
-      goto symbol_version_error;
+      SYMBOL_VERSION_ERR;
     }
     Elf_Sym *syms_data = addr + shdr[i].sh_offset;
 
@@ -210,93 +214,71 @@ static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
 
   int maj = 0, min = 0, pat = 0;
   if (sscanf(symbol + len, "%d.%d.%d", &maj, &min, &pat) < 1) {
-    goto symbol_version_error;
+    SYMBOL_VERSION_ERR;
   }
 
   PRINT_VERBOSE("%s%d.%d.%d\n", sym_prefix, maj, min, pat);
   munmap(addr, st.st_size);
   close(fd);
+
   return (pat + min*1000 + maj*1000000);
-
-symbol_version_error:
-  PRINT_VERBOSE("error: %s: %s\n", error, orig);
-  munmap(addr, st.st_size);
-  close(fd);
-  return -1;
-}
-
-static void dump_file(const char *dest, unsigned char *data, unsigned int len)
-{
-  int fd = creat(dest, DEFFILEMODE);
-  if (fd == -1) return;
-  ssize_t written = write(fd, data, len);
-  close(fd);
-  if (written != len) unlink(dest);
 }
 
 static int copy_lib(const char *lib, const char *destDir, char verbose)
 {
+  char *srcFull = NULL;
   char *destFull = NULL;
+  char *base;
   int fdIn = -1, fdOut = -1;
+  unsigned char buf[512*1024];
+  ssize_t n;
+
+#define COPY_LIB_FREE \
+  if (fdOut != -1) close(fdOut); \
+  if (fdIn != -1) close(fdIn); \
+  if (srcFull) free(srcFull); \
+  if (destFull) free(destFull);
 
   /* get full source and target paths */
-  char *srcFull = get_libpath(lib, verbose);
-  if (!srcFull) goto copy_lib_error;
+  srcFull = get_libpath(lib, verbose);
+  if (!srcFull) return -1;
 
-  char *base = basename(srcFull);
-  if (!base) goto copy_lib_error;
+  base = basename(srcFull);
+  if (!base) {
+    COPY_LIB_FREE;
+    return -1;
+  }
 
-  size_t len = strlen(destDir);
-  size_t len2 = strlen(base);
-  destFull = malloc(len + MAX(len2,32) + 2);
+  destFull = malloc(strlen(destDir) + MAX(strlen(base), 32) + 2);
   sprintf(destFull, "%s/%s", destDir, base);
 
   /* open source for reading */
   fdIn = open(srcFull, O_RDONLY|O_CLOEXEC);
-  if (fdIn == -1) goto copy_lib_error;
+  if (fdIn == -1) {
+    COPY_LIB_FREE;
+    return -1;
+  }
 
   /* open target for writing */
   mkdir(destDir, ACCESSPERMS);
   fdOut = creat(destFull, DEFFILEMODE);
-  if (fdOut == -1) goto copy_lib_error;
+  if (fdOut == -1) {
+    COPY_LIB_FREE;
+    return -1;
+  }
 
   /* copy data into target */
-  ssize_t n;
-  unsigned char buf[512*1024];
   while ((n = read(fdIn, &buf, sizeof(buf))) > 0) {
     if (write(fdOut, &buf, n) != n) {
-      goto copy_lib_error;
+      COPY_LIB_FREE;
+      return -1;
     }
   }
 
-  int rv = 0;
   fprintf(stderr, ">> %s\ncopied to -> %s\n", srcFull, destFull);
 
-  /* dump COPYING files */
-  char *p = destFull + len + 1;
-  strcpy(p, "COPYING.RUNTIME.gz");
-  dump_file(destFull, COPYING_RUNTIME_gz, COPYING_RUNTIME_gz_len);
-  p += 7;
-  strcpy(p, "3.gz");
-  dump_file(destFull, COPYING3_gz, COPYING3_gz_len);
-  strcpy(p, ".libgcc");
-  dump_file(destFull, COPYING_libgcc, COPYING_libgcc_len);
-  strcpy(p, ".libstdc++");
-  dump_file(destFull, COPYING_libstdc__, COPYING_libstdc___len);
-  fprintf(stderr, "(COPYING files were added too)\n");
-
-  goto copy_lib_end;
-
-copy_lib_error:
-  rv = -1;
-
-copy_lib_end:
-  if (fdOut != -1) close(fdOut);
-  if (fdIn != -1) close(fdIn);
-  if (srcFull) free(srcFull);
-  if (destFull) free(destFull);
-
-  return rv;
+  COPY_LIB_FREE;
+  return 0;
 }
 
 
@@ -315,10 +297,12 @@ int main(int argc, char **argv)
   symbol_version(LIBGCC_S_SO, "GCC_", 1);
   putchar('\n');
   symbol_version(LIBSTDCXX_SO, "GLIBCXX_", 1);
+  return 0;
 
 #else
 
   char v = 0, copy = 0;
+  int rv = 0;
 
   for (int i=1; i < argc; i++) {
     if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -360,17 +344,26 @@ int main(int argc, char **argv)
   *(p+1) = 0;
 
   size_t len = strlen(currdir);
-  char *libpath = malloc(len + MAX(sizeof(STDCXX_DIR), sizeof(LIBGCC_DIR)) +
-    MAX(sizeof(LIBSTDCXX_SO), sizeof(LIBGCC_S_SO)) + 2);
+  char *libpath = malloc(len + 2 +
+    MAX(sizeof(STDCXX_DIR), sizeof(LIBGCC_DIR)) +
+    MAX(sizeof(LIBSTDCXX_SO), sizeof(LIBGCC_S_SO)));
   strcpy(libpath, currdir);
   p = libpath + len;
 
   if (copy) {
     /* copy system libraries */
+
     strcpy(p, LIBGCC_DIR);
-    copy_lib(LIBGCC_S_SO, libpath, v);
+    if (copy_lib(LIBGCC_S_SO, libpath, v) == -1) {
+      free(libpath);
+      free(currdir);
+      return 1;
+    }
+
     strcpy(p, STDCXX_DIR);
-    copy_lib(LIBSTDCXX_SO, libpath, v);
+    if (copy_lib(LIBSTDCXX_SO, libpath, v) == -1) {
+      rv = 1;
+    }
   } else {
     /* get symbol versions */
 
@@ -386,12 +379,16 @@ int main(int argc, char **argv)
       printf("%s" STDCXX_DIR ":", currdir);
     }
 
-    putchar('\n');
+    if (ver != -1) {
+      putchar('\n');
+    } else {
+      rv = 1;
+    }
   }
 
   free(libpath);
   free(currdir);
-#endif
 
-  return 0;
+  return rv;
+#endif
 }

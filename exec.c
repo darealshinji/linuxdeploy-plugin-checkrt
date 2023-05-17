@@ -41,17 +41,119 @@
 
 #define _GNU_SOURCE
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <dlfcn.h>
 #include <string.h>
 #include <errno.h>
 
-#include "env.h"
 
 typedef int (*execve_func_t)(const char *filename, char *const argv[], char *const envp[]);
 
 #define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
+
+#define DEBUG(...) do { \
+    if (getenv("APPIMAGE_CHECKRT_DEBUG")) \
+        printf("APPIMAGE_CHECKRT>> " __VA_ARGS__); \
+} while (0)
+
+
+// env.c begin
+
+static char** env_allocate(size_t size) {
+    return calloc(size + 1, sizeof(char*));
+}
+
+void env_free(char* const *env) {
+    size_t len = 0;
+    while (env[len] != 0) {
+        free(env[len]);
+        len++;
+    }
+    free((char**)env);
+}
+
+pid_t get_parent_pid() {
+    pid_t ppid = 0;
+    char *s_ppid = getenv("PPID");
+
+    if(s_ppid) {
+        ppid = atoi(s_ppid);
+    }
+
+    if (!ppid) {
+        ppid = getppid();
+    }
+
+    return ppid;
+}
+
+static size_t get_number_of_variables(FILE *file, char **buffer, size_t *len) {
+    size_t number = 0;
+
+    if (getline(buffer, len, file) < 0)
+        return -1;
+
+    char *ptr = *buffer;
+    while (ptr < *buffer + *len) {
+        size_t var_len = strlen(ptr);
+        ptr += var_len + 1;
+        if (var_len == 0)
+            break;
+        number++;
+    }
+
+    return number != 0 ? (ssize_t)number : -1;
+}
+
+static char* const* env_from_buffer(FILE *file) {
+    char *buffer = NULL;
+    size_t len = 0;
+    size_t num_vars = get_number_of_variables(file, &buffer, &len);
+    char** env = env_allocate(num_vars);
+
+    size_t n = 0;
+    char *ptr = buffer;
+    while (ptr < buffer + len && n < num_vars) {
+        size_t var_len = strlen(ptr);
+        if (var_len == 0)
+            break;
+
+        env[n] = calloc(sizeof(char*), var_len + 1);
+        strncpy(env[n], ptr, var_len + 1);
+        DEBUG("\tenv var copied: %s\n", env[n]);
+        ptr += var_len + 1;
+        n++;
+    }
+    free(buffer);
+
+    return env;
+}
+
+static char* const* read_env_from_process(pid_t pid) {
+    char buffer[256] = {0};
+
+    snprintf(buffer, sizeof(buffer), "/proc/%d/environ", pid);
+    DEBUG("Reading env from parent process: %s\n", buffer);
+    FILE *env_file = fopen(buffer, "r");
+    if (!env_file) {
+        DEBUG("Error reading file: %s (%s)\n", buffer, strerror(errno));
+        return NULL;
+    }
+
+    char* const* env = env_from_buffer(env_file);
+    fclose(env_file);
+
+    return env;
+}
+
+char* const* read_parent_env() {
+    pid_t ppid = get_parent_pid();
+    return read_env_from_process(ppid);
+}
+
+// env.c end
 
 static const char* get_fullpath(const char *filename) {
     // Try to get the canonical path in case it's a relative path or symbolic
@@ -128,6 +230,15 @@ int main(int argc, char *argv[]) {
     putenv("APPIMAGE_CHECKRT_DEBUG=1");
     DEBUG("EXEC TEST\n");
     execv("./env_test", argv);
+
+    return 0;
+}
+#elif defined(ENV_TEST)
+int main() {
+    putenv("APPIMAGE_CHECKRT_DEBUG=1");
+    DEBUG("ENV TEST\n");
+    char **env = NULL;
+    read_parent_env(&env);
 
     return 0;
 }

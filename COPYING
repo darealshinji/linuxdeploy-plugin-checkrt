@@ -1,5 +1,5 @@
-checkrt.c: 2022 <djcj@gmx.de>
-env.c exec.c: 2018 Pablo Marcos Oltra <pablo.marcos.oltra@gmail.com>
+checkrt.c: 2022-2023 <djcj@gmx.de>
+exec.c: 2018 Pablo Marcos Oltra <pablo.marcos.oltra@gmail.com>
 
 The MIT License
 
