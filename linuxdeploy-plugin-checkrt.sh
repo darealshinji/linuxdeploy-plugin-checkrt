@@ -53,37 +53,22 @@ typedef Elf32_Shdr  Elf_Shdr;
 typedef Elf32_Sym   Elf_Sym;
 #endif
 
-#define LIBGCC_S_SO  "libgcc_s.so.1"
-#define LIBSTDCXX_SO "libstdc++.so.6"
-#define LIBGCC_DIR   "gcc"
-#define STDCXX_DIR   "cxx"
-
 #define MAX(X,Y)  (((X) > (Y)) ? (X) : (Y))
-#define PRINT_VERBOSE(FMT, ...)  if (verbose) { fprintf(stderr, FMT, __VA_ARGS__); }
 
 
-static char *get_libpath(const char *lib, char verbose)
+static char *get_libpath(const char *lib)
 {
   struct link_map *map = NULL;
   char *path;
 
-  /* It's very important to use dlmopen() together with the argument LM_ID_NEWLM,
-   * otherwise the bundled library and the system library will use the same
-   * namespace and the path of the bundled library might be returned when you
-   * expected the system one.
-   *
-   * Note: if dlmopen() gets stuck in a loop that's a bug in glibc which was
-   * fixed in release 2.37
-   * https://sourceware.org/bugzilla/show_bug.cgi?id=29600
-   */
-  void *handle = dlmopen(LM_ID_NEWLM, lib, RTLD_LAZY);
+  void *handle = dlopen(lib, RTLD_LAZY);
   if (!handle) {
-    PRINT_VERBOSE("error: failed to dlmopen() file: %s\n", lib);
+    fprintf(stderr, "error: failed to dlmopen() file: %s\n", lib);
     return NULL;
   }
 
   if (dlinfo(handle, RTLD_DI_LINKMAP, &map) == -1) {
-    PRINT_VERBOSE("error: could not retrieve information: %s\n", lib);
+    fprintf(stderr, "error: could not retrieve information: %s\n", lib);
     dlclose(handle);
     return NULL;
   }
@@ -94,38 +79,23 @@ static char *get_libpath(const char *lib, char verbose)
   return path;
 }
 
-static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
+static int symbol_version(const char *lib, const char *sym_prefix, char *buffer, size_t bufsize)
 {
   int fd = -1;
   void *addr = NULL;
   const char *error = "";
 
 #define SYMBOL_VERSION_ERR \
-  PRINT_VERBOSE("error: %s: %s\n", error, orig); \
+  fprintf(stderr, "error: %s: %s\n", error, lib); \
   munmap(addr, st.st_size); \
   close(fd); \
   return -1;
 
-  /* let dlopen() do all the compatibility checks */
-  char *orig = get_libpath(lib, verbose);
-  if (!orig) return -1;
-
-  fd = open(orig, O_RDONLY);
+  fd = open(lib, O_RDONLY);
   if (fd < 0) {
-    PRINT_VERBOSE("error: failed to open() file: %s\n", orig);
-    free(orig);
+    fprintf(stderr, "error: failed to open() file: %s\n", lib);
     return -1;
   }
-
-  if (verbose) {
-    if (strcmp(lib, orig) == 0) {
-      fprintf(stderr, "%s\n", orig);
-    } else {
-      fprintf(stderr, "%s -> %s\n", lib, orig);
-    }
-  }
-
-  free(orig);
 
   /* make sure file size is larger than the required ELF header size */
   struct stat st;
@@ -219,185 +189,60 @@ static int symbol_version(const char *lib, const char *sym_prefix, char verbose)
     }
   }
 
+  if (!symbol) {
+    fprintf(stderr, "error: no symbol with prefix %s found: %s\n", sym_prefix, lib);
+    munmap(addr, st.st_size);
+    close(fd);
+    return -1;
+  }
+
   int maj = 0, min = 0, pat = 0;
   if (sscanf(symbol + len, "%d.%d.%d", &maj, &min, &pat) < 1) {
     SYMBOL_VERSION_ERR;
   }
 
-  PRINT_VERBOSE("%s%d.%d.%d\n", sym_prefix, maj, min, pat);
+  strncpy(buffer, symbol, bufsize - 1);
   munmap(addr, st.st_size);
   close(fd);
 
   return (pat + min*1000 + maj*1000000);
 }
 
-static int copy_lib(const char *lib, const char *destDir, char verbose)
-{
-  char *srcFull = NULL;
-  char *destFull = NULL;
-  char *base;
-  int fdIn = -1, fdOut = -1;
-  unsigned char buf[512*1024];
-  ssize_t n;
-
-#define COPY_LIB_FREE \
-  if (fdOut != -1) close(fdOut); \
-  if (fdIn != -1) close(fdIn); \
-  if (srcFull) free(srcFull); \
-  if (destFull) free(destFull);
-
-  /* get full source and target paths */
-  srcFull = get_libpath(lib, verbose);
-  if (!srcFull) return -1;
-
-  base = basename(srcFull);
-  if (!base) {
-    COPY_LIB_FREE;
-    return -1;
-  }
-
-  destFull = malloc(strlen(destDir) + MAX(strlen(base), 32) + 2);
-  sprintf(destFull, "%s/%s", destDir, base);
-
-  /* open source for reading */
-  fdIn = open(srcFull, O_RDONLY|O_CLOEXEC);
-  if (fdIn == -1) {
-    COPY_LIB_FREE;
-    return -1;
-  }
-
-  /* open target for writing */
-  mkdir(destDir, ACCESSPERMS);
-  fdOut = creat(destFull, DEFFILEMODE);
-  if (fdOut == -1) {
-    COPY_LIB_FREE;
-    return -1;
-  }
-
-  /* copy data into target */
-  while ((n = read(fdIn, &buf, sizeof(buf))) > 0) {
-    if (write(fdOut, &buf, n) != n) {
-      COPY_LIB_FREE;
-      return -1;
-    }
-  }
-
-  fprintf(stderr, ">> %s\ncopied to -> %s\n", srcFull, destFull);
-
-  COPY_LIB_FREE;
-  return 0;
-}
-
 
 int main(int argc, char **argv)
 {
-#if CHECKRT_TEST == 1
+  if (argc < 2) {
+    printf("usage: %s LIBRARY\n"
+      "LIBRARY must be 'libgcc_s.so.1' or 'libstdc++.so.6' or\n"
+      "a relative or absolute path to either one.\n",
+      argv[0]);
+    return 1;
+  }
 
-  printf("Test:\n\n");
-  copy_lib(LIBGCC_S_SO, "./" LIBGCC_DIR, 1);
-  copy_lib(LIBSTDCXX_SO, "./" STDCXX_DIR, 1);
-  putchar('\n');
-  symbol_version("./" LIBGCC_DIR "/" LIBGCC_S_SO, "GCC_", 1);
-  putchar('\n');
-  symbol_version("./" STDCXX_DIR "/" LIBSTDCXX_SO, "GLIBCXX_", 1);
-  putchar('\n');
-  symbol_version(LIBGCC_S_SO, "GCC_", 1);
-  putchar('\n');
-  symbol_version(LIBSTDCXX_SO, "GLIBCXX_", 1);
+  const char *sym = "GLIBCXX_";
+  char *lib = argv[1];
+  char *base = basename(lib);
+  char buf[32] = {0};
+
+  if (strcmp(base, "libgcc_s.so.1") == 0) {
+    sym = "GCC_";
+  } else if (strcmp(base, "libstdc++.so.6") != 0) {
+    return 1;
+  }
+
+  char *path = get_libpath(lib);
+  if (!path) return 1;
+  int version = symbol_version(path, sym, buf, sizeof(buf));
+
+  if (version == -1) {
+    free(path);
+    return 1;
+  }
+
+  printf("%s\n%s\n%d\n", path, buf, version);
+  free(path);
+
   return 0;
-
-#else
-
-  char v = 0, copy = 0;
-  int rv = 0;
-
-  for (int i=1; i < argc; i++) {
-    if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-      fprintf(stderr,
-        "usage:\n"
-        "  %s -c|--copy-libraries\n"
-        "  %s -h|--help\n"
-        "  %s -v|--verbose\n"
-        "\n"
-        "This program will look for the following libraries relative to its\n"
-        "location, check if they are usable and add them to LD_LIBRARY_PATH\n"
-        "if they are newer than the system's equivalent:\n"
-        "\n"
-        "  " LIBGCC_DIR "/" LIBGCC_S_SO "\n"
-        "  " STDCXX_DIR "/" LIBSTDCXX_SO "\n", argv[0], argv[0], argv[0]);
-      return 0;
-    } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
-      v = 1;
-    } else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--copy-libraries") == 0) {
-      copy = 1;
-    } else {
-      fprintf(stderr, "error: invalid argument: %s\nTry `%s --help' for more information.\n", argv[i], argv[0]);
-      return 1;
-    }
-  }
-
-  char *currdir = realpath("/proc/self/exe", NULL);
-  if (!currdir) {
-    fprintf(stderr, "error: realpath() failed to resolve /proc/self/exe\n");
-    return 1;
-  }
-
-  char *p = strrchr(currdir, '/');
-  if (!p) {
-    perror("strrchr()");
-    free(currdir);
-    return 1;
-  }
-  *(p+1) = 0;
-
-  size_t len = strlen(currdir);
-  char *libpath = malloc(len + 2 +
-    MAX(sizeof(STDCXX_DIR), sizeof(LIBGCC_DIR)) +
-    MAX(sizeof(LIBSTDCXX_SO), sizeof(LIBGCC_S_SO)));
-  strcpy(libpath, currdir);
-  p = libpath + len;
-
-  if (copy) {
-    /* copy system libraries */
-
-    strcpy(p, LIBGCC_DIR);
-    if (copy_lib(LIBGCC_S_SO, libpath, v) == -1) {
-      free(libpath);
-      free(currdir);
-      return 1;
-    }
-
-    strcpy(p, STDCXX_DIR);
-    if (copy_lib(LIBSTDCXX_SO, libpath, v) == -1) {
-      rv = 1;
-    }
-  } else {
-    /* get symbol versions */
-
-    strcpy(p, LIBGCC_DIR "/" LIBGCC_S_SO);
-    int ver = symbol_version(libpath, "GCC_", v);
-    if (ver != -1 && ver > symbol_version(LIBGCC_S_SO, "GCC_", v)) {
-      printf("%s" LIBGCC_DIR ":", currdir);
-    }
-
-    strcpy(p, STDCXX_DIR "/" LIBSTDCXX_SO);
-    ver = symbol_version(libpath, "GLIBCXX_", v);
-    if (ver != -1 && ver > symbol_version(LIBSTDCXX_SO, "GLIBCXX_", v)) {
-      printf("%s" STDCXX_DIR ":", currdir);
-    }
-
-    if (ver != -1) {
-      putchar('\n');
-    } else {
-      rv = 1;
-    }
-  }
-
-  free(libpath);
-  free(currdir);
-
-  return rv;
-#endif
 }
 
 __EOF__
@@ -1525,6 +1370,7 @@ fi
 
 APPDIR="$(realpath "$APPDIR")"
 echo "Installing AppRun hook 'checkrt'"
+
 mkdir -p "$APPDIR/apprun-hooks/checkrt"
 
 cat > "$APPDIR/apprun-hooks/linuxdeploy-plugin-checkrt.sh" << \EOF
@@ -1533,11 +1379,37 @@ cat > "$APPDIR/apprun-hooks/linuxdeploy-plugin-checkrt.sh" << \EOF
 if [ -z "$APPDIR" ]; then
     APPDIR="$(dirname "$(realpath "$0")")"
 fi
-if [ -x "$APPDIR/apprun-hooks/checkrt/checkrt" ]; then
-    export LD_LIBRARY_PATH="$($APPDIR/apprun-hooks/checkrt/checkrt)${LD_LIBRARY_PATH}"
+
+CHECKRTDIR="$APPDIR/apprun-hooks/checkrt"
+
+if [ -x "$CHECKRTDIR/checkrt" ]; then
+    CHECKRT_LIBS=
+
+    if [ -e "$CHECKRTDIR/cxx/libstdc++.so.6" ]; then
+        ver_local="$("$CHECKRTDIR/checkrt" "$CHECKRTDIR/cxx/libstdc++.so.6" | tail -n1)"
+        ver_sys="$("$CHECKRTDIR/checkrt" "libstdc++.so.6" | tail -n1)"
+
+        if [ $ver_sys -gt $ver_local ]; then
+            CHECKRT_LIBS="$CHECKRTDIR/cxx:"
+        fi
+    fi
+
+    if [ -e "$CHECKRTDIR/gcc/libgcc_s.so.1" ]; then
+        ver_local="$("$CHECKRTDIR/checkrt" "$CHECKRTDIR/gcc/libgcc_s.so.1" | tail -n1)"
+        ver_sys="$("$CHECKRTDIR/checkrt" "libgcc_s.so.1" | tail -n1)"
+
+        if [ $ver_sys -gt $ver_local ]; then
+            CHECKRT_LIBS="$CHECKRTDIR/gcc:$CHECKRT_LIBS"
+        fi
+    fi
+
+    if [ -n "$CHECKRT_LIBS" ]; then
+        export LD_LIBRARY_PATH="${CHECKRT_LIBS}${LD_LIBRARY_PATH}"
+    fi
 fi
-if [ -f "$APPDIR/apprun-hooks/checkrt/exec.so" ]; then
-    export LD_PRELOAD="$APPDIR/apprun-hooks/checkrt/exec.so:${LD_PRELOAD}"
+
+if [ -f "$CHECKRTDIR/exec.so" ]; then
+    export LD_PRELOAD="$CHECKRTDIR/exec.so:${LD_PRELOAD}"
 fi
 EOF
 
@@ -1545,10 +1417,13 @@ cd "$APPDIR/apprun-hooks/checkrt"
 
 save_files
 
+LDFLAGS="-Wl,--as-needed -static-libgcc -ldl -s"
 echo "Compiling checkrt"
-gcc -O2 checkrt.c -o checkrt -s -ldl
+cc -O2 checkrt.c -o checkrt $LDFLAGS
 echo "Compiling exec.so"
-gcc -shared -O2 -fPIC exec.c -o exec.so -s -ldl
+cc -shared -O2 -fPIC exec.c -o exec.so $LDFLAGS
 rm checkrt.c exec.c
 
-./checkrt --copy-libraries
+mkdir cxx gcc
+cp -v "$(./checkrt "libstdc++.so.6" | head -n1)" "$PWD/cxx"
+cp -v "$(./checkrt "libgcc_s.so.1" | head -n1)" "$PWD/gcc"
