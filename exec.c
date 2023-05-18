@@ -18,17 +18,15 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-
 /*
  * This exec.so library is intended to restore the environment of the AppImage's
  * parent process. This is done to avoid library clashing of bundled libraries
- * with external processes. e.g when running the web browser
+ * with external processes, e.g when running the web browser.
  *
  * The intended usage is as follows:
  *
  * 1. This library is injected to the dynamic loader through LD_PRELOAD
- *    automatically in AppRun **only** if `usr/optional/exec.so` exists:
- *    e.g `LD_PRELOAD=$APPDIR/usr/optional/exec.so My.AppImage`
+ *    automatically in AppRun **only** if `exec.so` exists.
  *
  * 2. This library will intercept calls to new processes and will detect whether
  *    those calls are for binaries within the AppImage bundle or external ones.
@@ -51,21 +49,17 @@
 
 typedef int (*execve_func_t)(const char *filename, char *const argv[], char *const envp[]);
 
+#define API __attribute__ ((visibility ("default")))
 #define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
 
 #define DEBUG(...) do { \
-    if (getenv("APPIMAGE_CHECKRT_DEBUG")) \
-        printf("APPIMAGE_CHECKRT>> " __VA_ARGS__); \
+    if (getenv("APPIMAGE_EXEC_DEBUG")) \
+        printf("APPIMAGE_EXEC>> " __VA_ARGS__); \
 } while (0)
 
 
-// env.c begin
-
-static char** env_allocate(size_t size) {
-    return calloc(size + 1, sizeof(char*));
-}
-
-void env_free(char* const *env) {
+static void env_free(char* const *env)
+{
     size_t len = 0;
     while (env[len] != 0) {
         free(env[len]);
@@ -74,22 +68,8 @@ void env_free(char* const *env) {
     free((char**)env);
 }
 
-pid_t get_parent_pid() {
-    pid_t ppid = 0;
-    char *s_ppid = getenv("PPID");
-
-    if(s_ppid) {
-        ppid = atoi(s_ppid);
-    }
-
-    if (!ppid) {
-        ppid = getppid();
-    }
-
-    return ppid;
-}
-
-static size_t get_number_of_variables(FILE *file, char **buffer, size_t *len) {
+static size_t get_number_of_variables(FILE *file, char **buffer, size_t *len)
+{
     size_t number = 0;
 
     if (getline(buffer, len, file) < 0)
@@ -107,11 +87,12 @@ static size_t get_number_of_variables(FILE *file, char **buffer, size_t *len) {
     return number != 0 ? (ssize_t)number : -1;
 }
 
-static char* const* env_from_buffer(FILE *file) {
+static char* const* env_from_buffer(FILE *file)
+{
     char *buffer = NULL;
     size_t len = 0;
     size_t num_vars = get_number_of_variables(file, &buffer, &len);
-    char** env = env_allocate(num_vars);
+    char** env = calloc(num_vars + 1, sizeof(char*));
 
     size_t n = 0;
     char *ptr = buffer;
@@ -131,7 +112,8 @@ static char* const* env_from_buffer(FILE *file) {
     return env;
 }
 
-static char* const* read_env_from_process(pid_t pid) {
+static char* const* read_env_from_process(pid_t pid)
+{
     char buffer[256] = {0};
 
     snprintf(buffer, sizeof(buffer), "/proc/%d/environ", pid);
@@ -148,14 +130,8 @@ static char* const* read_env_from_process(pid_t pid) {
     return env;
 }
 
-char* const* read_parent_env() {
-    pid_t ppid = get_parent_pid();
-    return read_env_from_process(ppid);
-}
-
-// env.c end
-
-static const char* get_fullpath(const char *filename) {
+static const char* get_fullpath(const char *filename)
+{
     // Try to get the canonical path in case it's a relative path or symbolic
     // link. Otherwise, use which to get the fullpath of the binary
     char *fullpath = canonicalize_file_name(filename);
@@ -166,7 +142,8 @@ static const char* get_fullpath(const char *filename) {
     return filename;
 }
 
-static int is_external_process(const char *filename) {
+static int is_external_process(const char *filename)
+{
     const char *appdir = getenv("APPDIR");
     if (!appdir)
         return 0;
@@ -175,13 +152,14 @@ static int is_external_process(const char *filename) {
     return strncmp(filename, appdir, MIN(strlen(filename), strlen(appdir)));
 }
 
-static int exec_common(execve_func_t function, const char *filename, char* const argv[], char* const envp[]) {
+static int exec_common(execve_func_t function, const char *filename, char* const argv[], char* const envp[])
+{
     const char *fullpath = get_fullpath(filename);
     DEBUG("filename %s, fullpath %s\n", filename, fullpath);
     char* const *env = envp;
     if (is_external_process(fullpath)) {
-        DEBUG("External process detected. Restoring env vars from parent %d\n", get_parent_pid());
-        env = read_parent_env();
+        DEBUG("External process detected. Restoring env vars from parent %d\n", getppid());
+        env = read_env_from_process(getppid());
         if (!env) {
             env = envp;
             DEBUG("Error restoring env vars from parent\n");
@@ -197,7 +175,8 @@ static int exec_common(execve_func_t function, const char *filename, char* const
     return ret;
 }
 
-int execve(const char *filename, char *const argv[], char *const envp[]) {
+API int execve(const char *filename, char *const argv[], char *const envp[])
+{
     DEBUG("execve call hijacked: %s\n", filename);
     execve_func_t execve_orig = dlsym(RTLD_NEXT, "execve");
     if (!execve_orig)
@@ -206,12 +185,13 @@ int execve(const char *filename, char *const argv[], char *const envp[]) {
     return exec_common(execve_orig, filename, argv, envp);
 }
 
-int execv(const char *filename, char *const argv[]) {
+API int execv(const char *filename, char *const argv[]) {
     DEBUG("execv call hijacked: %s\n", filename);
     return execve(filename, argv, environ);
 }
 
-int execvpe(const char *filename, char *const argv[], char *const envp[]) {
+API int execvpe(const char *filename, char *const argv[], char *const envp[])
+{
     DEBUG("execvpe call hijacked: %s\n", filename);
     execve_func_t execve_orig = dlsym(RTLD_NEXT, "execvpe");
     if (!execve_orig)
@@ -220,26 +200,23 @@ int execvpe(const char *filename, char *const argv[], char *const envp[]) {
     return exec_common(execve_orig, filename, argv, envp);
 }
 
-int execvp(const char *filename, char *const argv[]) {
+API int execvp(const char *filename, char *const argv[]) {
     DEBUG("execvp call hijacked: %s\n", filename);
     return execvpe(filename, argv, environ);
 }
 
 #ifdef EXEC_TEST
 int main(int argc, char *argv[]) {
-    putenv("APPIMAGE_CHECKRT_DEBUG=1");
+    putenv("APPIMAGE_EXEC_DEBUG=1");
     DEBUG("EXEC TEST\n");
     execv("./env_test", argv);
-
     return 0;
 }
 #elif defined(ENV_TEST)
 int main() {
-    putenv("APPIMAGE_CHECKRT_DEBUG=1");
+    putenv("APPIMAGE_EXEC_DEBUG=1");
     DEBUG("ENV TEST\n");
-    char **env = NULL;
-    read_parent_env(&env);
-
+    read_env_from_process(getppid());
     return 0;
 }
 #endif

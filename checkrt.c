@@ -53,15 +53,20 @@ static char *get_libpath(const char *lib)
 {
   struct link_map *map = NULL;
   char *path;
-
   void *handle = dlopen(lib, RTLD_LAZY);
+
   if (!handle) {
-    fprintf(stderr, "error: failed to dlmopen() file: %s\n", lib);
+    const char *err = dlerror();
+    if (err) {
+      fprintf(stderr, "%s\n", err);
+    } else {
+      fprintf(stderr, "failed to dlopen() file: %s\n", lib);
+    }
     return NULL;
   }
 
   if (dlinfo(handle, RTLD_DI_LINKMAP, &map) == -1) {
-    fprintf(stderr, "error: could not retrieve information: %s\n", lib);
+    fprintf(stderr, "could not retrieve information from library: %s\n", lib);
     dlclose(handle);
     return NULL;
   }
@@ -79,14 +84,14 @@ static int symbol_version(const char *lib, const char *sym_prefix, char *buffer,
   const char *error = "";
 
 #define SYMBOL_VERSION_ERR \
-  fprintf(stderr, "error: %s: %s\n", error, lib); \
+  fprintf(stderr, "%s: %s\n", error, lib); \
   munmap(addr, st.st_size); \
   close(fd); \
   return -1;
 
   fd = open(lib, O_RDONLY);
   if (fd < 0) {
-    fprintf(stderr, "error: failed to open() file: %s\n", lib);
+    fprintf(stderr, "failed to open() file: %s\n", lib);
     return -1;
   }
 
@@ -183,7 +188,7 @@ static int symbol_version(const char *lib, const char *sym_prefix, char *buffer,
   }
 
   if (!symbol) {
-    fprintf(stderr, "error: no symbol with prefix %s found: %s\n", sym_prefix, lib);
+    fprintf(stderr, "no symbol with prefix %s found: %s\n", sym_prefix, lib);
     munmap(addr, st.st_size);
     close(fd);
     return -1;
@@ -225,8 +230,8 @@ int main(int argc, char **argv)
 
   char *path = get_libpath(lib);
   if (!path) return 1;
-  int version = symbol_version(path, sym, buf, sizeof(buf));
 
+  int version = symbol_version(path, sym, buf, sizeof(buf));
   if (version == -1) {
     free(path);
     return 1;
