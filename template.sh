@@ -81,11 +81,17 @@ cd "$APPDIR/apprun-hooks/checkrt"
 
 save_files
 
+# check for a compiler
+set +e
+CC=$(which $(uname -m)-linux-gnu-gcc gcc clang | head -n1)
+set -e
+
+test -n $CC || CC=cc
 LDFLAGS="-Wl,--as-needed -static-libgcc -ldl -s"
 echo "Compiling checkrt"
-cc -O2 checkrt.c -o checkrt $LDFLAGS
+$CC -O2 checkrt.c -o checkrt $LDFLAGS
 echo "Compiling exec.so"
-cc -shared -O2 -fPIC exec.c -o exec.so $LDFLAGS
+$CC -shared -O2 -fPIC exec.c -o exec.so $LDFLAGS
 rm checkrt.c exec.c
 
 mkdir cxx gcc
