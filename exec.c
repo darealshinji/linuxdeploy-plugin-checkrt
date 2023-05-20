@@ -36,26 +36,34 @@
  *    the AppImage parent by reading `/proc/[pid]/environ`.
  *    This is the conservative approach taken.
  */
-
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
-
+#endif
+#include <errno.h>
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <dlfcn.h>
 #include <string.h>
-#include <errno.h>
+#include <sys/param.h> /* MIN() */
+#include <unistd.h>
 
 
 typedef int (*execve_func_t)(const char *filename, char *const argv[], char *const envp[]);
 
-#define API __attribute__ ((visibility ("default")))
-#define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
+#define VISIBLE __attribute__ ((visibility ("default")))
 
-#define DEBUG(...) do { \
-    if (getenv("APPIMAGE_EXEC_DEBUG")) \
+#if !defined(DEBUG) && (defined(EXEC_TEST) || defined(ENV_TEST))
+#define DEBUG 1
+#endif
+
+#ifdef DEBUG
+#define DEBUG_PRINT(...) \
+    if (getenv("APPIMAGE_EXEC_DEBUG")) { \
         printf("APPIMAGE_EXEC>> " __VA_ARGS__); \
-} while (0)
+    }
+#else
+#define DEBUG_PRINT(...)  /**/
+#endif
 
 
 static void env_free(char* const *env)
@@ -103,7 +111,7 @@ static char* const* env_from_buffer(FILE *file)
 
         env[n] = calloc(sizeof(char*), var_len + 1);
         strncpy(env[n], ptr, var_len + 1);
-        DEBUG("\tenv var copied: %s\n", env[n]);
+        DEBUG_PRINT("\tenv var copied: %s\n", env[n]);
         ptr += var_len + 1;
         n++;
     }
@@ -117,10 +125,10 @@ static char* const* read_env_from_process(pid_t pid)
     char buffer[256] = {0};
 
     snprintf(buffer, sizeof(buffer), "/proc/%d/environ", pid);
-    DEBUG("Reading env from parent process: %s\n", buffer);
+    DEBUG_PRINT("Reading env from parent process: %s\n", buffer);
     FILE *env_file = fopen(buffer, "r");
     if (!env_file) {
-        DEBUG("Error reading file: %s (%s)\n", buffer, strerror(errno));
+        DEBUG_PRINT("Error reading file: %s (%s)\n", buffer, strerror(errno));
         return NULL;
     }
 
@@ -130,92 +138,85 @@ static char* const* read_env_from_process(pid_t pid)
     return env;
 }
 
-static const char* get_fullpath(const char *filename)
-{
-    // Try to get the canonical path in case it's a relative path or symbolic
-    // link. Otherwise, use which to get the fullpath of the binary
-    char *fullpath = canonicalize_file_name(filename);
-    DEBUG("filename %s, canonical path %s\n", filename, fullpath);
-    if (fullpath)
-        return fullpath;
-
-    return filename;
-}
-
 static int is_external_process(const char *filename)
 {
     const char *appdir = getenv("APPDIR");
     if (!appdir)
         return 0;
-    DEBUG("APPDIR = %s\n", appdir);
+    DEBUG_PRINT("APPDIR = %s\n", appdir);
 
     return strncmp(filename, appdir, MIN(strlen(filename), strlen(appdir)));
 }
 
 static int exec_common(execve_func_t function, const char *filename, char* const argv[], char* const envp[])
 {
-    const char *fullpath = get_fullpath(filename);
-    DEBUG("filename %s, fullpath %s\n", filename, fullpath);
+    // Try to get the canonical path in case it's a relative path or symbolic link.
+    char *fullpath = canonicalize_file_name(filename);
+    DEBUG_PRINT("filename %s, fullpath %s\n", filename, fullpath);
+
     char* const *env = envp;
     if (is_external_process(fullpath)) {
-        DEBUG("External process detected. Restoring env vars from parent %d\n", getppid());
+        DEBUG_PRINT("External process detected. Restoring env vars from parent %d\n", getppid());
         env = read_env_from_process(getppid());
         if (!env) {
             env = envp;
-            DEBUG("Error restoring env vars from parent\n");
+            DEBUG_PRINT("Error restoring env vars from parent\n");
         }
     }
     int ret = function(filename, argv, env);
 
     if (fullpath != filename)
-        free((char*)fullpath);
+        free(fullpath);
+
     if (env != envp)
         env_free(env);
 
     return ret;
 }
 
-API int execve(const char *filename, char *const argv[], char *const envp[])
+VISIBLE int execve(const char *filename, char *const argv[], char *const envp[])
 {
-    DEBUG("execve call hijacked: %s\n", filename);
+    DEBUG_PRINT("execve call hijacked: %s\n", filename);
     execve_func_t execve_orig = dlsym(RTLD_NEXT, "execve");
-    if (!execve_orig)
-        DEBUG("Error getting execve original symbol: %s\n", strerror(errno));
+    if (!execve_orig) {
+        DEBUG_PRINT("Error getting execve original symbol: %s\n", strerror(errno));
+    }
 
     return exec_common(execve_orig, filename, argv, envp);
 }
 
-API int execv(const char *filename, char *const argv[]) {
-    DEBUG("execv call hijacked: %s\n", filename);
+VISIBLE int execv(const char *filename, char *const argv[]) {
+    DEBUG_PRINT("execv call hijacked: %s\n", filename);
     return execve(filename, argv, environ);
 }
 
-API int execvpe(const char *filename, char *const argv[], char *const envp[])
+VISIBLE int execvpe(const char *filename, char *const argv[], char *const envp[])
 {
-    DEBUG("execvpe call hijacked: %s\n", filename);
+    DEBUG_PRINT("execvpe call hijacked: %s\n", filename);
     execve_func_t execve_orig = dlsym(RTLD_NEXT, "execvpe");
-    if (!execve_orig)
-        DEBUG("Error getting execvpe original symbol: %s\n", strerror(errno));
+    if (!execve_orig) {
+        DEBUG_PRINT("Error getting execvpe original symbol: %s\n", strerror(errno));
+    }
 
     return exec_common(execve_orig, filename, argv, envp);
 }
 
-API int execvp(const char *filename, char *const argv[]) {
-    DEBUG("execvp call hijacked: %s\n", filename);
+VISIBLE int execvp(const char *filename, char *const argv[]) {
+    DEBUG_PRINT("execvp call hijacked: %s\n", filename);
     return execvpe(filename, argv, environ);
 }
 
 #ifdef EXEC_TEST
 int main(int argc, char *argv[]) {
     putenv("APPIMAGE_EXEC_DEBUG=1");
-    DEBUG("EXEC TEST\n");
-    execv("./env_test", argv);
+    puts("EXEC TEST");
+    execv("/bin/true", argv);
     return 0;
 }
 #elif defined(ENV_TEST)
 int main() {
     putenv("APPIMAGE_EXEC_DEBUG=1");
-    DEBUG("ENV TEST\n");
+    puts("ENV TEST");
     read_env_from_process(getppid());
     return 0;
 }

@@ -46,8 +46,6 @@ typedef Elf32_Shdr  Elf_Shdr;
 typedef Elf32_Sym   Elf_Sym;
 #endif
 
-#define MAX(X,Y)  (((X) > (Y)) ? (X) : (Y))
-
 
 static char *get_libpath(const char *lib)
 {
@@ -77,51 +75,23 @@ static char *get_libpath(const char *lib)
   return path;
 }
 
-static int symbol_version(const char *lib, const char *sym_prefix, char *buffer, size_t bufsize)
+static const char *find_symbol(int fd, size_t fsize, void *addr, const char *lib, const char *sym_prefix)
 {
-  int fd = -1;
-  void *addr = NULL;
-  const char *error = "";
-
-#define SYMBOL_VERSION_ERR \
-  fprintf(stderr, "%s: %s\n", error, lib); \
-  munmap(addr, st.st_size); \
-  close(fd); \
-  return -1;
-
-  fd = open(lib, O_RDONLY);
-  if (fd < 0) {
-    fprintf(stderr, "failed to open() file: %s\n", lib);
-    return -1;
-  }
-
-  /* make sure file size is larger than the required ELF header size */
-  struct stat st;
-  if (fstat(fd, &st) < 0 || st.st_size < sizeof(Elf_Ehdr)) {
-    error = "fstat() failed or returned a too low file size";
-    SYMBOL_VERSION_ERR;
-  }
-
-  /* mmap() library */
-  addr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-  if (addr == MAP_FAILED) {
-    error = "mmap() failed";
-    SYMBOL_VERSION_ERR;
-  }
-
   /* ELF header */
   Elf_Ehdr *ehdr = addr;
-  error = "offset exceeding filesize";
-  if (ehdr->e_shoff > st.st_size) {
-    SYMBOL_VERSION_ERR;
+  const char *error = "offset exceeding filesize";
+  if (ehdr->e_shoff > fsize) {
+    fprintf(stderr, "%s: %s\n", error, lib);
+    return NULL;
   }
 
   Elf_Shdr *shdr = addr + ehdr->e_shoff;
   int shnum = ehdr->e_shnum;
   Elf_Shdr *sh_strtab = &shdr[ehdr->e_shstrndx];
 
-  if (sh_strtab->sh_offset > st.st_size) {
-    SYMBOL_VERSION_ERR;
+  if (sh_strtab->sh_offset > fsize) {
+    fprintf(stderr, "%s: %s\n", error, lib);
+    return NULL;
   }
   const char *sh_strtab_p = addr + sh_strtab->sh_offset;
   const char *sh_dynstr_p = sh_strtab_p;
@@ -133,13 +103,15 @@ static int symbol_version(const char *lib, const char *sym_prefix, char *buffer,
     const char *name = sh_strtab_p_const + shdr[i].sh_name;
 
     if (strcmp(name, ".strtab") == 0) {
-      if (shdr[i].sh_offset > st.st_size) {
-        SYMBOL_VERSION_ERR;
+      if (shdr[i].sh_offset > fsize) {
+        fprintf(stderr, "%s: %s\n", error, lib);
+        return NULL;
       }
       sh_strtab_p = addr + shdr[i].sh_offset;
     } else if (strcmp(name, ".dynstr") == 0) {
-      if (shdr[i].sh_offset > st.st_size) {
-        SYMBOL_VERSION_ERR;
+      if (shdr[i].sh_offset > fsize) {
+        fprintf(stderr, "%s: %s\n", error, lib);
+        return NULL;
       }
       sh_dynstr_p = addr + shdr[i].sh_offset;
     }
@@ -154,8 +126,9 @@ static int symbol_version(const char *lib, const char *sym_prefix, char *buffer,
       continue;
     }
 
-    if (shdr[i].sh_offset > st.st_size) {
-      SYMBOL_VERSION_ERR;
+    if (shdr[i].sh_offset > fsize) {
+      fprintf(stderr, "%s: %s\n", error, lib);
+      return NULL;
     }
     Elf_Sym *syms_data = addr + shdr[i].sh_offset;
 
@@ -187,23 +160,55 @@ static int symbol_version(const char *lib, const char *sym_prefix, char *buffer,
     }
   }
 
-  if (!symbol) {
-    fprintf(stderr, "no symbol with prefix %s found: %s\n", sym_prefix, lib);
-    munmap(addr, st.st_size);
+  return symbol;
+}
+
+static int symbol_version(const char *lib, const char *sym_prefix, char *buffer, size_t bufsize)
+{
+  int rv = -1;
+  buffer[0] = 0;
+
+  /* open file */
+  int fd = open(lib, O_RDONLY);
+  if (fd < 0) {
+    fprintf(stderr, "failed to open() file: %s\n", lib);
+    return -1;
+  }
+
+  /* make sure file size is larger than the required ELF header size */
+  struct stat st;
+  if (fstat(fd, &st) < 0 || st.st_size < sizeof(Elf_Ehdr)) {
+    fprintf(stderr, "fstat() failed or returned a too low file size: %s\n", lib);
     close(fd);
     return -1;
   }
 
-  int maj = 0, min = 0, pat = 0;
-  if (sscanf(symbol + len, "%d.%d.%d", &maj, &min, &pat) < 1) {
-    SYMBOL_VERSION_ERR;
+  /* mmap() library */
+  void *addr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+  if (addr == MAP_FAILED) {
+    fprintf(stderr, "mmap() failed: %s\n", lib);
+    close(fd);
+    return -1;
   }
 
-  strncpy(buffer, symbol, bufsize - 1);
-  munmap(addr, st.st_size);
+  /* look for symbol */
+  size_t len = strlen(sym_prefix);
+  const char *symbol = find_symbol(fd, st.st_size, addr, lib, sym_prefix);
+
+  if (symbol && strncmp(symbol, sym_prefix, len) == 0) {
+    int maj = 0, min = 0, pat = 0;
+    if (sscanf(symbol + len, "%d.%d.%d", &maj, &min, &pat) == 3) {
+      rv = pat + min*1000 + maj*1000000;
+      strncpy(buffer, symbol, bufsize - 1);
+    }
+  }
+
+  if (addr != MAP_FAILED) {
+    munmap(addr, st.st_size);
+  }
   close(fd);
 
-  return (pat + min*1000 + maj*1000000);
+  return rv;
 }
 
 
@@ -233,6 +238,7 @@ int main(int argc, char **argv)
 
   int version = symbol_version(path, sym, buf, sizeof(buf));
   if (version == -1) {
+    fprintf(stderr, "no symbol with prefix %s found: %s\n", sym, lib);
     free(path);
     return 1;
   }
