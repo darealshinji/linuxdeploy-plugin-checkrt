@@ -1,11 +1,6 @@
 *.o
 *.so
-*.gz
+*.AppImage
 
-src/*_test
-src/checkrt
-src/res.h
-
-src/cxx/
-src/gcc/
-
+example/appdir
+example/example
