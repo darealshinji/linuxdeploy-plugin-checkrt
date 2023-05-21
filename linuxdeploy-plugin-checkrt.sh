@@ -1374,31 +1374,51 @@ CHECKRTDIR="$APPDIR/apprun-hooks/checkrt"
 if [ -x "$CHECKRTDIR/checkrt" ]; then
     CHECKRT_LIBS=
 
+    # check for libstdc++
     if [ -e "$CHECKRTDIR/cxx/libstdc++.so.6" ]; then
-        ver_local="$("$CHECKRTDIR/checkrt" "$CHECKRTDIR/cxx/libstdc++.so.6" | tail -n1)"
+        ver_bundle="$("$CHECKRTDIR/checkrt" "$CHECKRTDIR/cxx/libstdc++.so.6" | tail -n1)"
         ver_sys="$("$CHECKRTDIR/checkrt" "libstdc++.so.6" | tail -n1)"
 
-        if [ $ver_sys -gt $ver_local ]; then
+        if [ -n "$CHECKRT_DEBUG" ]; then
+            echo "CHECKRT>> libstdc++.so.6 system = $ver_sys"
+            echo "CHECKRT>> libstdc++.so.6 bundle = $ver_bundle"
+        fi
+
+        if [ $ver_bundle -gt $ver_sys ]; then
             CHECKRT_LIBS="$CHECKRTDIR/cxx:"
         fi
     fi
 
+    # check for libgcc
     if [ -e "$CHECKRTDIR/gcc/libgcc_s.so.1" ]; then
-        ver_local="$("$CHECKRTDIR/checkrt" "$CHECKRTDIR/gcc/libgcc_s.so.1" | tail -n1)"
+        ver_bundle="$("$CHECKRTDIR/checkrt" "$CHECKRTDIR/gcc/libgcc_s.so.1" | tail -n1)"
         ver_sys="$("$CHECKRTDIR/checkrt" "libgcc_s.so.1" | tail -n1)"
 
-        if [ $ver_sys -gt $ver_local ]; then
+        if [ -n "$CHECKRT_DEBUG" ]; then
+            echo "CHECKRT>> libgcc_s.so.1 system = $ver_sys"
+            echo "CHECKRT>> libgcc_s.so.1 bundle = $ver_bundle"
+        fi
+
+        if [ $ver_bundle -gt $ver_sys ]; then
             CHECKRT_LIBS="$CHECKRTDIR/gcc:$CHECKRT_LIBS"
         fi
     fi
 
+    # prepend to LD_LIBRARY_PATH
     if [ -n "$CHECKRT_LIBS" ]; then
         export LD_LIBRARY_PATH="${CHECKRT_LIBS}${LD_LIBRARY_PATH}"
     fi
 fi
 
+# check for exec.so
 if [ -f "$CHECKRTDIR/exec.so" ]; then
     export LD_PRELOAD="$CHECKRTDIR/exec.so:${LD_PRELOAD}"
+fi
+
+# debugging
+if [ -n "$CHECKRT_DEBUG" ]; then
+    echo "CHECKRT>> LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+    echo "CHECKRT>> LD_PRELOAD=$LD_PRELOAD"
 fi
 EOF
 
