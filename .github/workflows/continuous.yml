@@ -1,15 +1,40 @@
 name: Continuous release
 
-on: [push]
+on: [push, pull_request, workflow_dispatch]
+
+env:
+  APPIMAGE_EXTRACT_AND_RUN: 1
+  TERM: xterm-256color
 
 jobs:
+  generate:
+    name: Generate plugin script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Generate script
+        run: |
+          bash -xe generate.sh
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: Script
+          path: linuxdeploy-plugin-checkrt.sh
+
   upload:
     name: Create release and upload artifacts
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    run: |
-        ./generate.sh
-        wget https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
-        chmod +x pyuploadtool-x86_64.AppImage
-        ./pyuploadtool-x86_64.AppImage linuxdeploy-plugin-checkrt.sh
+    needs:
+      - generate
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v2
+      - name: Inspect directory after downloading artifacts
+        run: ls -alFR
+      - name: Create release and upload artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+            wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
+            chmod +x pyuploadtool-x86_64.AppImage
+            ./pyuploadtool-x86_64.AppImage **/linuxdeploy-plugin-checkrt.sh
