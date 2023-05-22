@@ -21,7 +21,7 @@ Usage
 -----
 ``` sh
 # get linuxdeploy and linuxdeploy-plugin-checkrt and make them executable
-wget -c "https://raw.githubusercontent.com/darealshinji/linuxdeploy-plugin-checkrt/master/linuxdeploy-plugin-checkrt.sh"
+wget -c "https://github.com/darealshinji/linuxdeploy-plugin-checkrt/releases/download/continuous/linuxdeploy-plugin-checkrt.sh"
 wget -c "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
 chmod a+x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-checkrt.sh
 
