@@ -10,7 +10,6 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     run: |
         ./generate.sh
-        linuxdeploy-plugin-checkrt.sh
         wget https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
         chmod +x pyuploadtool-x86_64.AppImage
         ./pyuploadtool-x86_64.AppImage linuxdeploy-plugin-checkrt.sh
