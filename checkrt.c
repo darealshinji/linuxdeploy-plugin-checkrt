@@ -75,7 +75,7 @@ static char *get_libpath(const char *lib)
   return path;
 }
 
-static const char *find_symbol(int fd, size_t fsize, void *addr, const char *lib, const char *sym_prefix)
+static const char *find_symbol(size_t fsize, void *addr, const char *lib, const char *sym_prefix)
 {
   /* ELF header */
   Elf_Ehdr *ehdr = addr;
@@ -193,7 +193,7 @@ static int symbol_version(const char *lib, const char *sym_prefix, char *buffer,
 
   /* look for symbol */
   size_t len = strlen(sym_prefix);
-  const char *symbol = find_symbol(fd, st.st_size, addr, lib, sym_prefix);
+  const char *symbol = find_symbol(st.st_size, addr, lib, sym_prefix);
 
   if (symbol && strncmp(symbol, sym_prefix, len) == 0) {
     int maj = 0, min = 0, pat = 0;
