@@ -23,6 +23,7 @@
 #define _GNU_SOURCE
 #endif
 #include <link.h>
+#include <ctype.h>
 #include <dlfcn.h>
 #include <elf.h>
 #include <fcntl.h>
@@ -75,89 +76,46 @@ static char *get_libpath(const char *lib)
   return path;
 }
 
-static const char *find_symbol(size_t fsize, void *addr, const char *lib, const char *sym_prefix)
+static const char *find_symbol(void *addr, const char *sym_prefix)
 {
-  /* ELF header */
-  Elf_Ehdr *ehdr = addr;
-  const char *error = "offset exceeding filesize";
-  if (ehdr->e_shoff > fsize) {
-    fprintf(stderr, "%s: %s\n", error, lib);
-    return NULL;
-  }
-
-  Elf_Shdr *shdr = addr + ehdr->e_shoff;
-  int shnum = ehdr->e_shnum;
-  Elf_Shdr *sh_strtab = &shdr[ehdr->e_shstrndx];
-
-  if (sh_strtab->sh_offset > fsize) {
-    fprintf(stderr, "%s: %s\n", error, lib);
-    return NULL;
-  }
-  const char *sh_strtab_p = addr + sh_strtab->sh_offset;
-  const char *sh_dynstr_p = sh_strtab_p;
-  const char * const sh_strtab_p_const = sh_strtab_p;
-
-  /* get strtab/dynstr */
-  for (int i = 0; i < shnum; ++i) {
-    if (shdr[i].sh_type != SHT_STRTAB) continue;
-    const char *name = sh_strtab_p_const + shdr[i].sh_name;
-
-    if (strcmp(name, ".strtab") == 0) {
-      if (shdr[i].sh_offset > fsize) {
-        fprintf(stderr, "%s: %s\n", error, lib);
-        return NULL;
-      }
-      sh_strtab_p = addr + shdr[i].sh_offset;
-    } else if (strcmp(name, ".dynstr") == 0) {
-      if (shdr[i].sh_offset > fsize) {
-        fprintf(stderr, "%s: %s\n", error, lib);
-        return NULL;
-      }
-      sh_dynstr_p = addr + shdr[i].sh_offset;
-    }
-  }
-
   const char *symbol = NULL;
-  size_t len = strlen(sym_prefix);
 
-  /* iterate through sections */
-  for (int i = 0; i < shnum; ++i) {
-    if (shdr[i].sh_type != SHT_SYMTAB && shdr[i].sh_type != SHT_DYNSYM) {
-      continue;
+  /* ELF header, section header string table */
+  Elf_Ehdr *ehdr = addr;
+  Elf_Shdr *shdr = addr + ehdr->e_shoff;
+  Elf_Shdr *sh_strtab = &shdr[ehdr->e_shstrndx];
+  const char * const strtab = addr + sh_strtab->sh_offset;
+  Elf_Shdr *sh_dynstr = NULL;
+
+  /* iterate through sections to find .dynstr */
+  for (size_t i = 0; i < ehdr->e_shnum; i++) {
+    if (memcmp(strtab + shdr[i].sh_name, ".dynstr\0", 8) == 0) {
+      sh_dynstr = &shdr[i];
+      break;
+    }
+  }
+
+  if (!sh_dynstr) return NULL;
+
+  const char *ptr = addr + sh_dynstr->sh_offset;
+  const char *start = ptr;
+  const char * const end = ptr + sh_dynstr->sh_size;
+
+  if (*end != '\0') return NULL;
+
+  const size_t len = strlen(sym_prefix);
+
+  /* parse .dynstr section data for sym_prefix */
+  for (; ptr < end; ptr++) {
+    if (*ptr != '\0') continue;
+
+    if (strncmp(start, sym_prefix, len) == 0 &&
+        (!symbol || strverscmp(start, symbol) > 0))
+    {
+      symbol = start;
     }
 
-    if (shdr[i].sh_offset > fsize) {
-      fprintf(stderr, "%s: %s\n", error, lib);
-      return NULL;
-    }
-    Elf_Sym *syms_data = addr + shdr[i].sh_offset;
-
-    /* iterate through symbols */
-    for (size_t j = 0; j < shdr[i].sh_size / sizeof(Elf_Sym); ++j) {
-      if (syms_data[j].st_shndx != SHN_ABS) {
-        continue;
-      }
-
-      const char *name;
-      if (shdr[i].sh_type == SHT_DYNSYM) {
-        name = sh_dynstr_p + syms_data[j].st_name;
-      } else {
-        name = sh_strtab_p + syms_data[j].st_name;
-      }
-
-      if (strncmp(name, sym_prefix, len) != 0) {
-        continue;
-      }
-
-      if (!symbol) {
-        symbol = name;
-        continue;
-      }
-
-      if (strverscmp(name, symbol) > 0) {
-        symbol = name;
-      }
-    }
+    start = ptr + 1;
   }
 
   return symbol;
@@ -166,6 +124,7 @@ static const char *find_symbol(size_t fsize, void *addr, const char *lib, const 
 static int symbol_version(const char *lib, const char *sym_prefix, char *buffer, size_t bufsize)
 {
   int rv = -1;
+
   buffer[0] = 0;
 
   /* open file */
@@ -177,7 +136,7 @@ static int symbol_version(const char *lib, const char *sym_prefix, char *buffer,
 
   /* make sure file size is larger than the required ELF header size */
   struct stat st;
-  if (fstat(fd, &st) < 0 || st.st_size < sizeof(Elf_Ehdr)) {
+  if (fstat(fd, &st) < 0 || st.st_size < (off_t)(sizeof(Elf_Ehdr))) {
     fprintf(stderr, "fstat() failed or returned a too low file size: %s\n", lib);
     close(fd);
     return -1;
@@ -193,7 +152,7 @@ static int symbol_version(const char *lib, const char *sym_prefix, char *buffer,
 
   /* look for symbol */
   size_t len = strlen(sym_prefix);
-  const char *symbol = find_symbol(st.st_size, addr, lib, sym_prefix);
+  const char *symbol = find_symbol(addr, sym_prefix);
 
   if (symbol && strncmp(symbol, sym_prefix, len) == 0) {
     int maj = 0, min = 0, pat = 0;
@@ -203,9 +162,7 @@ static int symbol_version(const char *lib, const char *sym_prefix, char *buffer,
     }
   }
 
-  if (addr != MAP_FAILED) {
-    munmap(addr, st.st_size);
-  }
+  munmap(addr, st.st_size);
   close(fd);
 
   return rv;
