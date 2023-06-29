@@ -34,174 +34,183 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/mman.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
-#ifdef __x86_64__
-typedef Elf64_Ehdr  Elf_Ehdr;
-typedef Elf64_Shdr  Elf_Shdr;
-typedef Elf64_Sym   Elf_Sym;
+#if defined(_LP64) || defined(__LP64__)
+typedef Elf64_Ehdr      Elf_Ehdr;
+typedef Elf64_Shdr      Elf_Shdr;
+typedef Elf64_Sym       Elf_Sym;
+#define ELF_ST_TYPE(x)  ELF64_ST_TYPE(x)
 #else
-typedef Elf32_Ehdr  Elf_Ehdr;
-typedef Elf32_Shdr  Elf_Shdr;
-typedef Elf32_Sym   Elf_Sym;
+typedef Elf32_Ehdr      Elf_Ehdr;
+typedef Elf32_Shdr      Elf_Shdr;
+typedef Elf32_Sym       Elf_Sym;
+#define ELF_ST_TYPE(x)  ELF32_ST_TYPE(x)
 #endif
 
 
-static char *get_libpath(const char *lib)
+char *get_libpath(const char *lib)
 {
-  struct link_map *map = NULL;
-  char *path;
-  void *handle = dlopen(lib, RTLD_LAZY);
+    /* not only do we get the full path but dlopen()
+     * also does all the compatibility checks for us */
 
-  if (!handle) {
-    const char *err = dlerror();
-    if (err) {
-      fprintf(stderr, "%s\n", err);
-    } else {
-      fprintf(stderr, "failed to dlopen() file: %s\n", lib);
+    struct link_map *map = NULL;
+    char *path, *err;
+    void *handle = dlopen(lib, RTLD_LAZY);
+
+    if (!handle) {
+        if ((err = dlerror()) == NULL) {
+            fprintf(stderr, "failed to dlopen() file: %s\n", lib);
+        } else {
+            fprintf(stderr, "%s\n", err);
+        }
+        return NULL;
     }
-    return NULL;
-  }
 
-  if (dlinfo(handle, RTLD_DI_LINKMAP, &map) == -1) {
-    fprintf(stderr, "could not retrieve information from library: %s\n", lib);
+    if (dlinfo(handle, RTLD_DI_LINKMAP, &map) == -1 || map->l_name[0] == 0) {
+	    fprintf(stderr, "could not retrieve information from library: %s\n", lib);
+	    dlclose(handle);
+	    return NULL;
+    }
+
+    path = strdup(map->l_name);
     dlclose(handle);
-    return NULL;
-  }
 
-  path = strdup(map->l_name);
-  dlclose(handle);
-
-  return path;
+    return path;
 }
 
-static const char *find_symbol(void *addr, const char *sym_prefix)
+const char *find_symbol(uint8_t *addr, const char *sym_prefix)
 {
-  const char *symbol = NULL;
+    const char *symbol = NULL;
+    Elf_Ehdr *ehdr = (Elf_Ehdr *)addr;
+    Elf_Shdr *shdr = (Elf_Shdr *)(addr + ehdr->e_shoff);
+    Elf_Shdr *dynstr = NULL;
+    Elf_Shdr *strtab = shdr + ehdr->e_shstrndx;
+    const char *data = (const char *)(addr + strtab->sh_offset);
 
-  /* ELF header, section header string table */
-  Elf_Ehdr *ehdr = addr;
-  Elf_Shdr *shdr = addr + ehdr->e_shoff;
-  Elf_Shdr *sh_strtab = &shdr[ehdr->e_shstrndx];
-  const char * const strtab = addr + sh_strtab->sh_offset;
-  Elf_Shdr *sh_dynstr = NULL;
-
-  /* iterate through sections to find .dynstr */
-  for (size_t i = 0; i < ehdr->e_shnum; i++) {
-    if (memcmp(strtab + shdr[i].sh_name, ".dynstr\0", 8) == 0) {
-      sh_dynstr = &shdr[i];
-      break;
-    }
-  }
-
-  if (!sh_dynstr) return NULL;
-
-  const char *ptr = addr + sh_dynstr->sh_offset;
-  const char *start = ptr;
-  const char * const end = ptr + sh_dynstr->sh_size;
-
-  if (*end != '\0') return NULL;
-
-  const size_t len = strlen(sym_prefix);
-
-  /* parse .dynstr section data for sym_prefix */
-  for (; ptr < end; ptr++) {
-    if (*ptr != '\0') continue;
-
-    if (strncmp(start, sym_prefix, len) == 0 &&
-        (!symbol || strverscmp(start, symbol) > 0))
-    {
-      symbol = start;
+    /* get .dynstr section */
+    for (size_t i = 0; i < ehdr->e_shnum; i++) {
+        if (strcmp(data + shdr[i].sh_name, ".dynstr") == 0) {
+            dynstr = &shdr[i];
+            break;
+        }
     }
 
-    start = ptr + 1;
-  }
+    if (!dynstr) return NULL;
 
-  return symbol;
+    const size_t len = strlen(sym_prefix);
+    data = (const char *)(addr + dynstr->sh_offset);
+
+    /* parse symbols */
+    for (int i = 0; i < ehdr->e_shnum; i++) {
+        if (shdr[i].sh_type != SHT_DYNSYM) {
+            continue;
+        }
+
+        Elf_Sym *sym = (Elf_Sym *)(addr + shdr[i].sh_offset);
+        const size_t num = shdr[i].sh_size / shdr[i].sh_entsize;
+
+        for (size_t j = 0; j < num; j++) {
+            const char *name = data + sym[j].st_name;
+
+            if (ELF_ST_TYPE(sym[j].st_info) == STT_OBJECT &&
+                strncmp(name, sym_prefix, len) == 0 &&
+                isdigit(name[len]) &&
+                strchr(name, '.') &&
+                (!symbol || strverscmp(symbol, name) < 0))
+            {
+                symbol = name;
+            }
+        }
+    }
+
+    return symbol;
 }
 
-static int symbol_version(const char *lib, const char *sym_prefix, char *buffer, size_t bufsize)
+int symbol_version(const char *lib, const char *sym_prefix, char *buf, size_t bufsize)
 {
-  int rv = -1;
+    int rv = -1;
 
-  buffer[0] = 0;
+    buf[0] = 0;
 
-  /* open file */
-  int fd = open(lib, O_RDONLY);
-  if (fd < 0) {
-    fprintf(stderr, "failed to open() file: %s\n", lib);
-    return -1;
-  }
+    /* open file */
+    int fd = open(lib, O_RDONLY);
 
-  /* make sure file size is larger than the required ELF header size */
-  struct stat st;
-  if (fstat(fd, &st) < 0 || st.st_size < (off_t)(sizeof(Elf_Ehdr))) {
-    fprintf(stderr, "fstat() failed or returned a too low file size: %s\n", lib);
-    close(fd);
-    return -1;
-  }
-
-  /* mmap() library */
-  void *addr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-  if (addr == MAP_FAILED) {
-    fprintf(stderr, "mmap() failed: %s\n", lib);
-    close(fd);
-    return -1;
-  }
-
-  /* look for symbol */
-  size_t len = strlen(sym_prefix);
-  const char *symbol = find_symbol(addr, sym_prefix);
-
-  if (symbol && strncmp(symbol, sym_prefix, len) == 0) {
-    int maj = 0, min = 0, pat = 0;
-    if (sscanf(symbol + len, "%d.%d.%d", &maj, &min, &pat) == 3) {
-      rv = pat + min*1000 + maj*1000000;
-      strncpy(buffer, symbol, bufsize - 1);
+    if (fd < 0) {
+        fprintf(stderr, "failed to open() file: %s\n", lib);
+        return -1;
     }
-  }
 
-  munmap(addr, st.st_size);
-  close(fd);
+    /* make sure file size is larger than the required ELF header size */
+    struct stat st;
 
-  return rv;
+    if (fstat(fd, &st) < 0 || st.st_size < (off_t) (sizeof(Elf_Ehdr))) {
+        fprintf(stderr, "fstat() failed or returned a too low file size: %s\n", lib);
+        close(fd);
+        return -1;
+    }
+
+    /* mmap() library */
+    uint8_t *addr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+
+    if (addr == MAP_FAILED) {
+        fprintf(stderr, "mmap() failed: %s\n", lib);
+        close(fd);
+        return -1;
+    }
+
+    /* look for symbol */
+    size_t len = strlen(sym_prefix);
+    const char *symbol = find_symbol(addr, sym_prefix);
+
+    if (symbol && strncmp(symbol, sym_prefix, len) == 0) {
+        int maj = 0, min = 0, pat = 0;
+
+        if (sscanf(symbol + len, "%d.%d.%d", &maj, &min, &pat) == 3) {
+            rv = pat + min * 1000 + maj * 1000000;
+            strncpy(buf, symbol, bufsize - 1);
+        }
+    }
+
+    munmap(addr, st.st_size);
+    close(fd);
+
+    return rv;
 }
-
 
 int main(int argc, char **argv)
 {
-  if (argc < 2) {
-    printf("usage: %s LIBRARY\n"
-      "LIBRARY must be 'libgcc_s.so.1' or 'libstdc++.so.6' or\n"
-      "a relative or absolute path to either one.\n",
-      argv[0]);
-    return 1;
-  }
+    if (argc < 2) {
+        printf("usage: %s LIBRARY\n"
+            "LIBRARY must be 'libgcc_s.so.1' or 'libstdc++.so.6' or\n"
+            "a relative or absolute path to either one.\n", argv[0]);
+        return 1;
+    }
 
-  const char *sym = "GLIBCXX_";
-  char *lib = argv[1];
-  char *base = basename(lib);
-  char buf[32] = {0};
+    const char *sym = "GLIBCXX_";
+    char *lib = argv[1];
+    char *base = basename(lib);
+    char buf[32] = { 0 };
 
-  if (strcmp(base, "libgcc_s.so.1") == 0) {
-    sym = "GCC_";
-  } else if (strcmp(base, "libstdc++.so.6") != 0) {
-    return 1;
-  }
+    if (strcmp(base, "libgcc_s.so.1") == 0) {
+	    sym = "GCC_";
+    } else if (strcmp(base, "libstdc++.so.6") != 0) {
+	    return 1;
+    }
 
-  char *path = get_libpath(lib);
-  if (!path) return 1;
+    char *path = get_libpath(lib);
+    if (!path) return 1;
 
-  int version = symbol_version(path, sym, buf, sizeof(buf));
-  if (version == -1) {
-    fprintf(stderr, "no symbol with prefix %s found: %s\n", sym, lib);
+    int version = symbol_version(path, sym, buf, sizeof(buf));
+
+    if (version == -1) {
+        fprintf(stderr, "no symbol with prefix %s found: %s\n", sym, lib);
+        free(path);
+        return 1;
+    }
+
+    printf("%s\n%s\n%d\n", path, buf, version);
     free(path);
-    return 1;
-  }
 
-  printf("%s\n%s\n%d\n", path, buf, version);
-  free(path);
-
-  return 0;
+    return 0;
 }
