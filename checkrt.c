@@ -37,16 +37,15 @@
 #include <unistd.h>
 
 #if defined(_LP64) || defined(__LP64__)
-typedef Elf64_Ehdr      Elf_Ehdr;
-typedef Elf64_Shdr      Elf_Shdr;
-typedef Elf64_Sym       Elf_Sym;
+#define ELF_T(x)  typedef Elf64_##x Elf_##x
 #define ELF_ST_TYPE(x)  ELF64_ST_TYPE(x)
 #else
-typedef Elf32_Ehdr      Elf_Ehdr;
-typedef Elf32_Shdr      Elf_Shdr;
-typedef Elf32_Sym       Elf_Sym;
+#define ELF_T(x)  typedef Elf32_##x Elf_##x
 #define ELF_ST_TYPE(x)  ELF32_ST_TYPE(x)
 #endif
+ELF_T(Ehdr);
+ELF_T(Shdr);
+ELF_T(Sym);
 
 
 char *get_libpath(const char *lib)
@@ -84,25 +83,27 @@ const char *find_symbol(uint8_t *addr, const char *sym_prefix)
     const char *symbol = NULL;
     Elf_Ehdr *ehdr = (Elf_Ehdr *)addr;
     Elf_Shdr *shdr = (Elf_Shdr *)(addr + ehdr->e_shoff);
-    Elf_Shdr *dynstr = NULL;
     Elf_Shdr *strtab = shdr + ehdr->e_shstrndx;
+    size_t dynstr_off = 0;
     const char *data = (const char *)(addr + strtab->sh_offset);
 
-    /* get .dynstr section */
+    /* get .dynstr offset */
     for (size_t i = 0; i < ehdr->e_shnum; i++) {
         if (strcmp(data + shdr[i].sh_name, ".dynstr") == 0) {
-            dynstr = &shdr[i];
+            dynstr_off = shdr[i].sh_offset;
             break;
         }
     }
 
-    if (!dynstr) return NULL;
+    if (dynstr_off == 0) {
+        return NULL;
+    }
 
     const size_t len = strlen(sym_prefix);
-    data = (const char *)(addr + dynstr->sh_offset);
+    data = (const char *)(addr + dynstr_off);
 
     /* parse symbols */
-    for (int i = 0; i < ehdr->e_shnum; i++) {
+    for (size_t i = 0; i < ehdr->e_shnum; i++) {
         if (shdr[i].sh_type != SHT_DYNSYM) {
             continue;
         }
