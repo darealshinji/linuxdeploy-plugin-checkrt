@@ -146,7 +146,7 @@ void copy_lib(const char *libname, const char *dirname1, const char *dirname2)
 }
 
 /* find symbol by prefix */
-const char *find_symbol(mmap_t *mem, const char *sym_prefix)
+char *find_symbol(mmap_t *mem, const char *sym_prefix)
 {
     size_t tmp = 0;
 
@@ -190,9 +190,6 @@ const char *find_symbol(mmap_t *mem, const char *sym_prefix)
     if (dynstr_off == 0) return NULL;
     CHECK_FSIZE(dynstr_off);
 
-    /* more than enough space for our symbols */
-    static char buf[32] = {0};
-
     const char *symbol = NULL;
     const size_t pfxlen = strlen(sym_prefix);
     data = (const char *)(mem->address + dynstr_off);
@@ -227,8 +224,6 @@ const char *find_symbol(mmap_t *mem, const char *sym_prefix)
                 ELF64_ST_TYPE(sym[j].st_info) == STT_OBJECT &&
                 ELF64_ST_BIND(sym[j].st_info) == STB_GLOBAL &&
                 ELF64_ST_VISIBILITY(sym[j].st_other) == STV_DEFAULT &&
-                /* check length */
-                strlen(name) < sizeof(buf) &&
                 /* compare with sym_prefix */
                 strncmp(name, sym_prefix, pfxlen) == 0 &&
                 isdigit(name[pfxlen]) &&
@@ -242,11 +237,11 @@ const char *find_symbol(mmap_t *mem, const char *sym_prefix)
         }
     }
 
-    return symbol ? strcpy(buf, symbol) : NULL;
+    return strdup(symbol);
 }
 
 /* mmap() library and look for symbol by prefix */
-const char *symbol_version(const char *lib, const char *sym_prefix)
+char *symbol_version(const char *lib, const char *sym_prefix)
 {
     struct stat st;
     mmap_t mem;
@@ -276,7 +271,7 @@ const char *symbol_version(const char *lib, const char *sym_prefix)
     }
 
     /* look for symbol */
-    const char *symbol = find_symbol(&mem, sym_prefix);
+    char *symbol = find_symbol(&mem, sym_prefix);
 
     if (symbol) {
         DEBUG_PRINT("symbol %s found in: %s", symbol, lib);
@@ -304,9 +299,9 @@ bool use_bundled_library(const char *libname, const char *dirname1, const char *
     /* check if bundled file exists */
     if (access(lib_bundle, F_OK) == 0) {
         /* get symbols */
-        const char *sym_bundle = symbol_version(lib_bundle, sym_prefix);
+        char *sym_bundle = symbol_version(lib_bundle, sym_prefix);
         char *lib_sys = get_libpath(libname);
-        const char *sym_sys = symbol_version(lib_sys, sym_prefix);
+        char *sym_sys = symbol_version(lib_sys, sym_prefix);
 
         /* compare symbols */
         if (sym_bundle && sym_sys && strverscmp(sym_bundle, sym_sys) > 0) {
@@ -314,6 +309,8 @@ bool use_bundled_library(const char *libname, const char *dirname1, const char *
         }
 
         FREE(lib_sys);
+        FREE(sym_sys);
+        FREE(sym_bundle);
     } else {
         DEBUG_PRINT("no access or file does not exist: %s", lib_bundle);
     }
