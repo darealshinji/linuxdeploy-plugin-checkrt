@@ -190,7 +190,9 @@ const char *find_symbol(mmap_t *mem, const char *sym_prefix)
     if (dynstr_off == 0) return NULL;
     CHECK_FSIZE(dynstr_off);
 
+    /* more than enough space for our symbols */
     static char buf[32] = {0};
+
     const char *symbol = NULL;
     const size_t pfxlen = strlen(sym_prefix);
     data = (const char *)(mem->address + dynstr_off);
@@ -255,13 +257,14 @@ const char *symbol_version(const char *lib, const char *sym_prefix)
         err(EXIT_FAILURE, "failed to open() file: %s\n", lib);
     }
 
+    /* fstat() path and check if it's a regular file (or a link to one) */
+    if (fstat(mem.fd, &st) < 0) err(EXIT_FAILURE, "fstat() failed: %s\n", lib);
+    if (!S_ISREG(st.st_mode)) err(EXIT_FAILURE, "not a regular file: %s\n", lib);
+
     /* make sure file size is larger than the required ELF header size */
-    if (fstat(mem.fd, &st) < 0) {
-        err(EXIT_FAILURE, "fstat() failed: %s\n", lib);
-    }
     mem.size = st.st_size;
 
-    if (mem.size < sizeof(Elf_Ehdr)) {
+    if (mem.size <= sizeof(Elf_Ehdr)) {
         err(EXIT_FAILURE, "fstat() returned a too low file size: %s\n", lib);
     }
 
