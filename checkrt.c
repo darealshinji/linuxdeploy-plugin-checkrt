@@ -237,7 +237,7 @@ char *find_symbol(mmap_t *mem, const char *sym_prefix)
         }
     }
 
-    return strdup(symbol);
+    return symbol ? strdup(symbol) : NULL;
 }
 
 /* mmap() library and look for symbol by prefix */
