@@ -47,37 +47,7 @@ fi
 CHECKRTDIR="$APPDIR/apprun-hooks/checkrt"
 
 if [ -x "$CHECKRTDIR/checkrt" ]; then
-    CHECKRT_LIBS=
-
-    # check for libstdc++
-    if [ -e "$CHECKRTDIR/cxx/libstdc++.so.6" ]; then
-        ver_bundle="$("$CHECKRTDIR/checkrt" "$CHECKRTDIR/cxx/libstdc++.so.6" | tail -n1)"
-        ver_sys="$("$CHECKRTDIR/checkrt" "libstdc++.so.6" | tail -n1)"
-
-        if [ -n "$CHECKRT_DEBUG" ]; then
-            echo "CHECKRT>> libstdc++.so.6 system = $ver_sys"
-            echo "CHECKRT>> libstdc++.so.6 bundle = $ver_bundle"
-        fi
-
-        if [ $ver_bundle -gt $ver_sys ]; then
-            CHECKRT_LIBS="$CHECKRTDIR/cxx:"
-        fi
-    fi
-
-    # check for libgcc
-    if [ -e "$CHECKRTDIR/gcc/libgcc_s.so.1" ]; then
-        ver_bundle="$("$CHECKRTDIR/checkrt" "$CHECKRTDIR/gcc/libgcc_s.so.1" | tail -n1)"
-        ver_sys="$("$CHECKRTDIR/checkrt" "libgcc_s.so.1" | tail -n1)"
-
-        if [ -n "$CHECKRT_DEBUG" ]; then
-            echo "CHECKRT>> libgcc_s.so.1 system = $ver_sys"
-            echo "CHECKRT>> libgcc_s.so.1 bundle = $ver_bundle"
-        fi
-
-        if [ $ver_bundle -gt $ver_sys ]; then
-            CHECKRT_LIBS="$CHECKRTDIR/gcc:$CHECKRT_LIBS"
-        fi
-    fi
+    CHECKRT_LIBS="$($CHECKRTDIR/checkrt)"
 
     # prepend to LD_LIBRARY_PATH
     if [ -n "$CHECKRT_LIBS" ]; then
@@ -101,19 +71,14 @@ cd "$APPDIR/apprun-hooks/checkrt"
 
 save_files
 
-# check for a compiler
-set +e
-CC=$(which $(uname -m)-linux-gnu-gcc gcc clang | head -n1)
-set -e
-
-test -n $CC || CC=cc
 LDFLAGS="-Wl,--as-needed -static-libgcc -ldl -s"
+
 echo "Compiling checkrt"
-$CC -O2 checkrt.c -o checkrt $LDFLAGS
+cc -O2 checkrt.c -o checkrt $LDFLAGS
+
 echo "Compiling exec.so"
-$CC -shared -O2 -fPIC exec.c -o exec.so $LDFLAGS
+cc -shared -O2 -fPIC exec.c -o exec.so $LDFLAGS
 rm checkrt.c exec.c
 
-mkdir cxx gcc
-cp -v "$(./checkrt "libstdc++.so.6" | head -n1)" "$PWD/cxx"
-cp -v "$(./checkrt "libgcc_s.so.1" | head -n1)" "$PWD/gcc"
+echo "Copy libgcc_s.so.1 and libstdc++.so.6"
+./checkrt --copy

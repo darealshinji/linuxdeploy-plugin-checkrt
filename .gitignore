@@ -1,6 +1,7 @@
 *.o
 *.so
 *.AppImage
+a.out
 
 example/appdir
 example/example
