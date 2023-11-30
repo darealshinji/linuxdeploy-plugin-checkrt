@@ -107,9 +107,10 @@ void copy_lib(const char *libname, const char *dirname1, const char *dirname2)
     char *src = get_libpath(libname);
     if (!src) err(EXIT_FAILURE, "cannot find %s in system", libname);
 
+    printf("Copy library: %s\n", src);
+
     /* create target directory */
-    const size_t len = strlen(dirname1) + strlen(dirname2) + strlen(libname) + 4;
-    char *target = malloc(len);
+    char *target = malloc(strlen(dirname1) + strlen(dirname2) + strlen(libname) + 3);
     sprintf(target, "%s/%s", dirname1, dirname2);
     mkdir(target, 0775);
 
@@ -125,8 +126,6 @@ void copy_lib(const char *libname, const char *dirname1, const char *dirname2)
     /* copy file content */
     ssize_t nread;
     uint8_t buf[512*1024];
-
-    DEBUG_PRINT("copy from [[%s]] to: %s", src, target);
 
     while ((nread = read(fd_in, buf, sizeof(buf))) > 0) {
         if (write(fd_out, buf, nread) != nread) {
@@ -153,14 +152,14 @@ char *find_symbol(mmap_t *mem, const char *sym_prefix)
     /* filesize check */
 #define CHECK_FSIZE(x) \
     if (x >= mem->size) { \
-        DEBUG_PRINT("%s", "offset exceeds filesize"); \
+        fprintf(stderr, "%s\n", "offset exceeds filesize"); \
         return NULL; \
     }
 
     /* overflow + filesize check */
 #define CHECK_OVERFLOW(a, b) \
     if (__builtin_add_overflow(a, b, &tmp)) { \
-        DEBUG_PRINT("%s", "overflow detected"); \
+        fprintf(stderr, "%s\n", "overflow detected"); \
         return NULL; \
     } \
     CHECK_FSIZE(tmp)
@@ -208,7 +207,7 @@ char *find_symbol(mmap_t *mem, const char *sym_prefix)
         /* do some extra checks to prevent floating-point exceptions
          * or similar issues */
         if (sh_sz < sh_esz || sh_sz == 0 || sh_esz == 0) {
-            DEBUG_PRINT("error: problematic math division [%ld/%ld] in section header found: %s",
+            fprintf(stderr, "problematic math division [%ld/%ld] in section header found: %s\n",
                 sh_sz, sh_esz, mem->filename);
             return NULL;
         }
@@ -291,8 +290,7 @@ char *symbol_version(const char *lib, const char *sym_prefix)
 bool use_bundled_library(const char *libname, const char *dirname1, const char *dirname2, const char *sym_prefix)
 {
     bool rv = false;
-    size_t len = strlen(dirname1) + strlen(dirname2) + strlen(libname) + 4;
-    char *lib_bundle = malloc(len);
+    char *lib_bundle = malloc(strlen(dirname1) + strlen(dirname2) + strlen(libname) + 3);
 
     sprintf(lib_bundle, "%s/%s/%s", dirname1, dirname2, libname);
 
@@ -361,7 +359,6 @@ void copy_libraries()
     char *dir = get_exe_dir();
     copy_lib("libgcc_s.so.1", dir, "gcc");
     copy_lib("libstdc++.so.6", dir, "cxx");
-    fprintf(stderr, "%s\n", "Files copied");
     FREE(dir);
 }
 

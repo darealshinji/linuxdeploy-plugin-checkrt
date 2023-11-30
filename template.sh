@@ -33,9 +33,10 @@ if [ "$APPDIR" == "" ]; then
 fi
 
 APPDIR="$(realpath "$APPDIR")"
-echo "Installing AppRun hook 'checkrt'"
+CHECKRTDIR="$APPDIR/checkrt"
 
-mkdir -p "$APPDIR/apprun-hooks/checkrt"
+echo "Installing AppRun hook 'checkrt'"
+mkdir -p "$APPDIR/apprun-hooks"
 
 cat > "$APPDIR/apprun-hooks/linuxdeploy-plugin-checkrt.sh" << \EOF
 #! /usr/bin/env bash
@@ -43,8 +44,6 @@ cat > "$APPDIR/apprun-hooks/linuxdeploy-plugin-checkrt.sh" << \EOF
 if [ -z "$APPDIR" ]; then
     APPDIR="$(dirname "$(realpath "$0")")"
 fi
-
-CHECKRTDIR="$APPDIR/apprun-hooks/checkrt"
 
 if [ -x "$CHECKRTDIR/checkrt" ]; then
     CHECKRT_LIBS="$($CHECKRTDIR/checkrt)"
@@ -67,7 +66,8 @@ if [ -n "$CHECKRT_DEBUG" ]; then
 fi
 EOF
 
-cd "$APPDIR/apprun-hooks/checkrt"
+mkdir -p "$CHECKRTDIR"
+cd "$CHECKRTDIR"
 
 save_files
 
@@ -80,5 +80,4 @@ echo "Compiling exec.so"
 cc -shared -O2 -fPIC exec.c -o exec.so $LDFLAGS
 rm checkrt.c exec.c
 
-echo "Copy libgcc_s.so.1 and libstdc++.so.6"
 ./checkrt --copy
