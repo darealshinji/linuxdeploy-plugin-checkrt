@@ -45,6 +45,8 @@ if [ -z "$APPDIR" ]; then
     APPDIR="$(dirname "$(realpath "$0")")"
 fi
 
+CHECKRTDIR="$APPDIR/checkrt"
+
 if [ -x "$CHECKRTDIR/checkrt" ]; then
     CHECKRT_LIBS="$($CHECKRTDIR/checkrt)"
 
