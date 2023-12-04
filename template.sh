@@ -33,7 +33,6 @@ if [ "$APPDIR" == "" ]; then
 fi
 
 APPDIR="$(realpath "$APPDIR")"
-CHECKRTDIR="$APPDIR/checkrt"
 
 echo "Installing AppRun hook 'checkrt'"
 mkdir -p "$APPDIR/apprun-hooks"
@@ -45,8 +44,8 @@ if [ -z "$APPDIR" ]; then
     APPDIR="$(dirname "$(realpath "$0")")"
 fi
 
-if [ -x "$CHECKRTDIR/checkrt" ]; then
-    CHECKRT_LIBS="$($CHECKRTDIR/checkrt)"
+if [ -x "$APPDIR/checkrt/checkrt" ]; then
+    CHECKRT_LIBS="$($APPDIR/checkrt/checkrt)"
 
     # prepend to LD_LIBRARY_PATH
     if [ -n "$CHECKRT_LIBS" ]; then
@@ -55,8 +54,8 @@ if [ -x "$CHECKRTDIR/checkrt" ]; then
 fi
 
 # check for exec.so
-if [ -f "$CHECKRTDIR/exec.so" ]; then
-    export LD_PRELOAD="$CHECKRTDIR/exec.so:${LD_PRELOAD}"
+if [ -f "$APPDIR/checkrt/exec.so" ]; then
+    export LD_PRELOAD="$APPDIR/checkrt/exec.so:${LD_PRELOAD}"
 fi
 
 # debugging
@@ -66,8 +65,8 @@ if [ -n "$CHECKRT_DEBUG" ]; then
 fi
 EOF
 
-mkdir -p "$CHECKRTDIR"
-cd "$CHECKRTDIR"
+mkdir -p "$APPDIR/checkrt"
+cd "$APPDIR/checkrt"
 
 save_files
 
@@ -81,3 +80,5 @@ cc -shared -O2 -fPIC exec.c -o exec.so $LDFLAGS
 rm checkrt.c exec.c
 
 ./checkrt --copy
+
+cd "$APPDIR"
