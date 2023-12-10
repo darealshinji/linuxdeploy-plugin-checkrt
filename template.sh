@@ -49,7 +49,7 @@ if [ -x "$APPDIR/checkrt/checkrt" ]; then
 
     # prepend to LD_LIBRARY_PATH
     if [ -n "$CHECKRT_LIBS" ]; then
-        export LD_LIBRARY_PATH="${CHECKRT_LIBS}${LD_LIBRARY_PATH}"
+        export LD_LIBRARY_PATH="${CHECKRT_LIBS}:${LD_LIBRARY_PATH}"
     fi
 fi
 
