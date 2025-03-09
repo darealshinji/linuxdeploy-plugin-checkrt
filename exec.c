@@ -39,7 +39,6 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
-#include <errno.h>
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,6 +56,7 @@ typedef int (*execve_func_t)(const char *filename, char *const argv[], char *con
 #endif
 
 #ifdef DEBUG
+#include <errno.h>
 #define DEBUG_PRINT(...) \
     if (getenv("APPIMAGE_EXEC_DEBUG")) { \
         printf("APPIMAGE_EXEC>> " __VA_ARGS__); \

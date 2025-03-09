@@ -71,12 +71,13 @@ cd "$APPDIR/checkrt"
 save_files
 
 LDFLAGS="-Wl,--as-needed -static-libgcc -ldl -s"
+CFLAGS="-O2 -DNDEBUG"
 
 echo "Compiling checkrt"
-cc -O2 checkrt.c -o checkrt $LDFLAGS
+cc $CFLAGS checkrt.c -o checkrt $LDFLAGS
 
 echo "Compiling exec.so"
-cc -shared -O2 -fPIC exec.c -o exec.so $LDFLAGS
+cc $CFLAGS -shared -fPIC exec.c -o exec.so $LDFLAGS
 rm checkrt.c exec.c
 
 ./checkrt --copy
