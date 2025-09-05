@@ -175,88 +175,63 @@ static void copy_lib(const char *dir, int flag)
 }
 
 /* find symbol by prefix */
-static char *find_symbol(const char *path, size_t length, uint8_t *addr)
+static char *find_symbol(const char *path, uint8_t *addr)
 {
-    size_t res = 0;
+    Elf_Ehdr *ehdr = (Elf_Ehdr *)addr;
+    Elf_Shdr *shdr = (Elf_Shdr *)(addr + ehdr->e_shoff);
+    Elf_Shdr *dyn = NULL;
 
-    /* filesize check */
-#define CHECK_FSIZE(x) \
-    if (x >= length) { \
-        errx(1, "%s", "*** offset exceeds filesize ***"); \
+    /* look for section header type SHT_DYNSYM */
+    for (size_t i = 0; i < ehdr->e_shnum; i++) {
+        if (shdr[i].sh_type == SHT_DYNSYM) {
+            dyn = &shdr[i];
+            break;
+        }
     }
 
-    /* overflow + filesize check */
-#define CHECK_OVERFLOW(a, b) \
-    if (__builtin_add_overflow(a, b, &res)) { \
-        errx(1, "%s", "*** overflow detected ***"); \
-    } \
-    CHECK_FSIZE(res)
-
+    if (!dyn) {
+        return NULL;
+    }
 
     /* get string table */
-    Elf_Ehdr *ehdr = (Elf_Ehdr *)addr;
-
-    CHECK_OVERFLOW(ehdr->e_shoff, ehdr->e_shstrndx);
-    Elf_Shdr *shdr = (Elf_Shdr *)(addr + ehdr->e_shoff);
     Elf_Shdr *strtab = shdr + ehdr->e_shstrndx;
+    const char *strings = (const char *)(addr + strtab->sh_offset);
     size_t dynstr_off = 0;
-
-    CHECK_FSIZE(strtab->sh_offset);
-    const char *data = (const char *)(addr + strtab->sh_offset);
 
     /* get .dynstr section */
     for (size_t i = 0; i < ehdr->e_shnum; i++) {
-        CHECK_OVERFLOW(strtab->sh_offset, shdr[i].sh_name);
-
-        if (strcmp(data + shdr[i].sh_name, ".dynstr") == 0) {
+        if (strcmp(strings + shdr[i].sh_name, ".dynstr") == 0) {
             dynstr_off = shdr[i].sh_offset;
             break;
         }
     }
 
-    if (dynstr_off == 0) return NULL;
-    CHECK_FSIZE(dynstr_off);
+    if (dynstr_off == 0) {
+        return NULL;
+    }
 
     const char *symbol = NULL;
-    data = (const char *)(addr + dynstr_off);
+    const size_t num = dyn->sh_size / dyn->sh_entsize;
+    Elf_Sym *sym = (Elf_Sym *)(addr + dyn->sh_offset);
+    strings = (const char *)(addr + dynstr_off);
 
-    /* look for section header type SHT_DYNSYM */
-    for (size_t i = 0; i < ehdr->e_shnum; i++) {
-        if (shdr[i].sh_type != SHT_DYNSYM) {
-            continue;
-        }
+    /* parse symbols */
+    for (size_t i = 0; i < num; i++) {
+        const char *name = strings + sym[i].st_name;
 
-        CHECK_FSIZE(shdr[i].sh_offset);
-        Elf_Sym *sym = (Elf_Sym *)(addr + shdr[i].sh_offset);
-
-        /* do some extra checks to prevent floating-point exceptions
-         * or similar issues */
-        if (shdr[i].sh_size < shdr[i].sh_entsize ||
-            shdr[i].sh_size == 0 ||
-            shdr[i].sh_entsize == 0)
+        if (*name == *prefix[idx] &&
+            strncmp(name, prefix[idx], prefix_len[idx]) == 0 &&  /* symbol name starts with prefix */
+            isdigit(*(name + prefix_len[idx])) &&  /* first byte after prefix is a digit */
+            strchr(name + prefix_len[idx], '.') &&  /* symbol name contains a dot */
+            ELF64_ST_TYPE(sym[i].st_info) == STT_OBJECT &&  /* data object */
+            ELF64_ST_BIND(sym[i].st_info) == STB_GLOBAL &&  /* global symbol */
+            ELF64_ST_VISIBILITY(sym[i].st_other) == STV_DEFAULT &&  /* default symbol visibility */
+            (!symbol || strverscmp(symbol, name) < 0))  /* get higher version string */
         {
-            errx(1, "problematic math division [%zu/%zu] found in section header: %s",
-                shdr[i].sh_size, shdr[i].sh_entsize, path);
-        }
-
-        /* parse symbols */
-        for (size_t j = 0; j < (shdr[i].sh_size / shdr[i].sh_entsize); j++) {
-            CHECK_OVERFLOW(dynstr_off, sym[j].st_name);
-            const char *name = data + sym[j].st_name;
-
-            if (ELF64_ST_TYPE(sym[j].st_info) == STT_OBJECT &&  /* data object */
-                ELF64_ST_BIND(sym[j].st_info) == STB_GLOBAL &&  /* global symbol */
-                ELF64_ST_VISIBILITY(sym[j].st_other) == STV_DEFAULT &&  /* default symbol visibility */
-                strncmp(name, prefix[idx], prefix_len[idx]) == 0 &&  /* symbol name starts with prefix */
-                isdigit(*(name + prefix_len[idx])) &&  /* first byte after prefix is a digit */
-                strchr(name + prefix_len[idx], '.') &&  /* symbol name contains a dot */
-                (!symbol || strverscmp(symbol, name) < 0))  /* save higher version string */
-            {
-                if (full_debug_mode) {
-                    DEBUG_PRINT("%s", name);
-                }
-                symbol = name;
+            if (full_debug_mode) {
+                DEBUG_PRINT("%s", name);
             }
+            symbol = name;
         }
     }
 
@@ -269,7 +244,7 @@ static char *symbol_version(const char *path)
     struct stat st;
     int fd;
 
-    /* check for compatibility (OS/API, bitness, etc.) */
+    /* let dlmopen() do compatibility checks for us (OS/API, bitness, etc.) */
     void *handle = load_lib_new_namespace(path);
     dlclose(handle);
 
@@ -290,7 +265,7 @@ static char *symbol_version(const char *path)
     }
 
     /* look for symbol */
-    char *symbol = find_symbol(path, st.st_size, addr);
+    char *symbol = find_symbol(path, addr);
 
     if (symbol) {
         DEBUG_PRINT("symbol %s found in: %s", symbol, path);

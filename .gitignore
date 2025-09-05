@@ -3,6 +3,9 @@
 *.AppImage
 a.out
 
+cxx/
+gcc/
+
 example/appdir
 example/example
 
