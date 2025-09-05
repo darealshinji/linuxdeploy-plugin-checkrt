@@ -175,13 +175,20 @@ static void copy_lib(const char *dir, int flag)
 }
 
 /* find symbol by prefix */
-static char *find_symbol(const char *path, uint8_t *addr)
+static char *find_symbol(const char *path, size_t length, uint8_t *addr)
 {
-    Elf_Ehdr *ehdr = (Elf_Ehdr *)addr;
-    Elf_Shdr *shdr = (Elf_Shdr *)(addr + ehdr->e_shoff);
-    Elf_Shdr *dyn = NULL;
+#define MKVAR(TYPE, VAR, OFF) \
+    if ((OFF) >= length) { errx(1, "%s", "*** offset exceeds filesize ***"); } \
+    TYPE VAR = (TYPE)(addr + (OFF))
 
-    /* look for section header type SHT_DYNSYM */
+    MKVAR( Elf_Ehdr *, ehdr, 0 );
+    MKVAR( Elf_Shdr *, shdr, ehdr->e_shoff );
+    Elf_Shdr *dyn = NULL;
+    Elf_Shdr *strtab = &shdr[ehdr->e_shstrndx];
+    size_t dynstr_off = 0;
+    const char *symbol = NULL;
+
+    /* get section header type SHT_DYNSYM */
     for (size_t i = 0; i < ehdr->e_shnum; i++) {
         if (shdr[i].sh_type == SHT_DYNSYM) {
             dyn = &shdr[i];
@@ -189,18 +196,15 @@ static char *find_symbol(const char *path, uint8_t *addr)
         }
     }
 
-    if (!dyn) {
+    if (!dyn || dyn->sh_size == 0 || dyn->sh_entsize == 0) {
         return NULL;
     }
 
-    /* get string table */
-    Elf_Shdr *strtab = shdr + ehdr->e_shstrndx;
-    const char *strings = (const char *)(addr + strtab->sh_offset);
-    size_t dynstr_off = 0;
-
     /* get .dynstr section */
     for (size_t i = 0; i < ehdr->e_shnum; i++) {
-        if (strcmp(strings + shdr[i].sh_name, ".dynstr") == 0) {
+        MKVAR( const char *, name, strtab->sh_offset + shdr[i].sh_name );
+
+        if (strcmp(name, ".dynstr") == 0) {
             dynstr_off = shdr[i].sh_offset;
             break;
         }
@@ -210,23 +214,21 @@ static char *find_symbol(const char *path, uint8_t *addr)
         return NULL;
     }
 
-    const char *symbol = NULL;
     const size_t num = dyn->sh_size / dyn->sh_entsize;
-    Elf_Sym *sym = (Elf_Sym *)(addr + dyn->sh_offset);
-    strings = (const char *)(addr + dynstr_off);
+    MKVAR( Elf_Sym *, sym, dyn->sh_offset );
 
     /* parse symbols */
     for (size_t i = 0; i < num; i++) {
-        const char *name = strings + sym[i].st_name;
+        MKVAR( const char *, name, dynstr_off + sym[i].st_name );
 
         if (*name == *prefix[idx] &&
-            strncmp(name, prefix[idx], prefix_len[idx]) == 0 &&  /* symbol name starts with prefix */
-            isdigit(*(name + prefix_len[idx])) &&  /* first byte after prefix is a digit */
-            strchr(name + prefix_len[idx], '.') &&  /* symbol name contains a dot */
-            ELF64_ST_TYPE(sym[i].st_info) == STT_OBJECT &&  /* data object */
-            ELF64_ST_BIND(sym[i].st_info) == STB_GLOBAL &&  /* global symbol */
-            ELF64_ST_VISIBILITY(sym[i].st_other) == STV_DEFAULT &&  /* default symbol visibility */
-            (!symbol || strverscmp(symbol, name) < 0))  /* get higher version string */
+            strncmp(name, prefix[idx], prefix_len[idx]) == 0 &&    /* symbol name starts with prefix */
+            isdigit(*(name + prefix_len[idx])) &&                  /* first byte after prefix is a digit */
+            strchr(name + prefix_len[idx], '.') &&                 /* symbol name contains a dot */
+            ELF64_ST_TYPE(sym[i].st_info) == STT_OBJECT &&         /* data object */
+            ELF64_ST_BIND(sym[i].st_info) == STB_GLOBAL &&         /* global symbol */
+            ELF64_ST_VISIBILITY(sym[i].st_other) == STV_DEFAULT && /* default symbol visibility */
+            (!symbol || strverscmp(symbol, name) < 0))             /* get higher version string */
         {
             if (full_debug_mode) {
                 DEBUG_PRINT("%s", name);
@@ -265,7 +267,7 @@ static char *symbol_version(const char *path)
     }
 
     /* look for symbol */
-    char *symbol = find_symbol(path, addr);
+    char *symbol = find_symbol(path, st.st_size, addr);
 
     if (symbol) {
         DEBUG_PRINT("symbol %s found in: %s", symbol, path);
