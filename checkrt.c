@@ -76,7 +76,6 @@ static bool full_debug_mode = false;
 /* index values */
 #define STDCXX 0
 #define LIBGCC 1
-static int idx = STDCXX;
 
 
 /* save strings and string lengths as const values */
@@ -161,22 +160,21 @@ static void *load_lib_new_namespace(const char *filename)
 
 
 /* retrieve full path of system library */
-static char *get_system_library_path(void)
+static char *get_system_library_path(const char *filename)
 {
     struct link_map *map = NULL;
-
-    void *handle = load_lib_new_namespace(libname[idx]);
+    void *handle = load_lib_new_namespace(filename);
 
     if (dlinfo(handle, RTLD_DI_LINKMAP, &map) == -1) {
-        errx_dlerror(libname[idx], "dlinfo() could not retrieve information from library");
+        errx_dlerror(filename, "dlinfo() could not retrieve information from library");
     }
 
     if (!map->l_name || map->l_name[0] == 0) {
-        errx(1, "%s: %s", libname[idx], "dlinfo() failed to get absolute pathname");
+        errx(1, "%s: %s", filename, "dlinfo() failed to get absolute pathname");
     }
 
     char *path = strdup(map->l_name);
-    DEBUG_PRINT("%s resolved to: %s", libname[idx], path);
+    DEBUG_PRINT("%s resolved to: %s", filename, path);
 
     dlclose(handle);
 
@@ -185,16 +183,16 @@ static char *get_system_library_path(void)
 
 
 /* copy library from system into directory next to binary */
-static void copy_lib(const char *dir, int flag)
+static void copy_lib(const char *dir, int idx)
 {
+    int fd_in, fd_out;
     ssize_t nread;
     uint8_t buf[512*1024];
 
-    assert(flag == STDCXX || flag == LIBGCC);
-    idx = flag;
+    assert(idx == STDCXX || idx == LIBGCC);
 
     /* find library */
-    char *src = get_system_library_path();
+    char *src = get_system_library_path(libname[idx]);
     printf("Copy library: %s\n", src);
 
     /* create target directory */
@@ -203,13 +201,16 @@ static void copy_lib(const char *dir, int flag)
     mkdir(target, 0775);
 
     /* open source file for reading */
-    int fd_in = open(src, O_RDONLY);
-    if (fd_in < 0) err(1, "cannot open file for reading: %s", src);
+    if ((fd_in = open(src, O_RDONLY)) < 0) {
+        err(1, "cannot open file for reading: %s", src);
+    }
 
     /* open target file for writing */
     strcat(target, libname[idx]);
-    int fd_out = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0664);
-    if (fd_out < 0) err(1, "cannot open file for writing: %s", target);
+
+    if ((fd_out = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0664)) < 0) {
+        err(1, "cannot open file for writing: %s", target);
+    }
 
     /* copy file content */
     while ((nread = read(fd_in, buf, sizeof(buf))) > 0) {
@@ -294,7 +295,7 @@ static size_t get_verdefnum(mem_map_t *mm, Elf_Shdr *dynamic)
  * find symbol in SHT_GNU_verdef section
  * https://refspecs.linuxfoundation.org/LSB_3.0.0/LSB-PDA/LSB-PDA.junk/symversion.html
  */
-static char *find_symbol(mem_map_t *mm)
+static char *find_symbol(mem_map_t *mm, int idx)
 {
     Elf_Ehdr *ehdr = (Elf_Ehdr *)mm->addr;
     Elf_Shdr *shdr = (Elf_Shdr *)get_offset(mm, ehdr->e_shoff);
@@ -357,7 +358,7 @@ static char *find_symbol(mem_map_t *mm)
 
 
 /* mmap() library and look for symbol by prefix */
-static char *symbol_version(const char *path)
+static char *symbol_version(const char *path, int idx)
 {
     /* let dlmopen() do compatibility checks for us (OS/API, bitness, etc.) */
     void *handle = load_lib_new_namespace(path);
@@ -365,7 +366,7 @@ static char *symbol_version(const char *path)
 
     /* mmap() library and look for symbol */
     mem_map_t *mm = map_file(path);
-    char *symbol = find_symbol(mm);
+    char *symbol = find_symbol(mm, idx);
 
     if (symbol) {
         DEBUG_PRINT("symbol %s found in: %s", symbol, path);
@@ -379,12 +380,11 @@ static char *symbol_version(const char *path)
 
 /* compare symbol versions and return true
  * if we should use the bundled library */
-static bool use_bundled_library(const char *dir, int flag)
+static bool use_bundled_library(const char *dir, int idx)
 {
     bool rv = false;
 
-    assert(flag == STDCXX || flag == LIBGCC);
-    idx = flag;
+    assert(idx == STDCXX || idx == LIBGCC);
 
     char *lib_bundle = malloc(strlen(dir) + subdir_len[idx] + libname_len[idx] + 3);
     sprintf(lib_bundle, "%s/%s/%s", dir, subdir[idx], libname[idx]);
@@ -392,9 +392,9 @@ static bool use_bundled_library(const char *dir, int flag)
     /* check if bundled file exists */
     if (access(lib_bundle, F_OK) == 0) {
         /* get symbols */
-        char *sym_bundle = symbol_version(lib_bundle);
-        char *lib_sys = get_system_library_path();
-        char *sym_sys = symbol_version(lib_sys);
+        char *sym_bundle = symbol_version(lib_bundle, idx);
+        char *lib_sys = get_system_library_path(libname[idx]);
+        char *sym_sys = symbol_version(lib_sys, idx);
 
         /* compare symbols */
         if (sym_bundle && sym_sys && strverscmp(sym_bundle, sym_sys) > 0) {
