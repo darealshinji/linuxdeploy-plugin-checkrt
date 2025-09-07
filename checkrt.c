@@ -40,15 +40,27 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+
 #if defined(_LP64) || defined(__LP64__)
-typedef Elf64_Ehdr Elf_Ehdr;
-typedef Elf64_Shdr Elf_Shdr;
-typedef Elf64_Sym  Elf_Sym;
+#define DEF(x) typedef Elf64_##x Elf_##x
 #else
-typedef Elf32_Ehdr Elf_Ehdr;
-typedef Elf32_Shdr Elf_Shdr;
-typedef Elf32_Sym  Elf_Sym;
+#define DEF(x) typedef Elf32_##x Elf_##x
 #endif
+
+DEF(Half);
+DEF(Word);
+DEF(Ehdr);
+DEF(Shdr);
+DEF(Dyn);
+DEF(Verdef);
+DEF(Verdaux);
+
+
+typedef struct {
+    int fd;
+    size_t size;
+    uint8_t *addr;
+} mem_map_t;
 
 
 /* debug messages */
@@ -78,6 +90,7 @@ SET_ARRAY(prefix,  "GLIBCXX_",       "GCC_");
 
 
 static void errx_dlerror(const char *filename, const char *msg) __attribute__((noreturn));
+static mem_map_t *map_file(const char *path) __attribute__((returns_nonnull));
 static void *load_lib_new_namespace(const char *filename) __attribute__((returns_nonnull));
 
 
@@ -93,6 +106,46 @@ static void errx_dlerror(const char *filename, const char *msg)
     }
 }
 
+
+static mem_map_t *map_file(const char *path)
+{
+    struct stat st;
+    int fd;
+    uint8_t *addr;
+
+    if ((fd = open(path, O_RDONLY)) == -1) {
+        err(1, "open(): %s", path);
+    }
+
+    if (fstat(fd, &st) == -1) {
+        err(1, "fstat(): %s", path);
+    }
+
+    if ((addr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0)) == MAP_FAILED) {
+        err(1, "mmap(): %s", path);
+    }
+
+    mem_map_t *mm = malloc(sizeof(mem_map_t));
+    mm->fd = fd;
+    mm->size = st.st_size;
+    mm->addr = addr;
+
+    return mm;
+}
+
+
+static void unmap_file(mem_map_t *mm)
+{
+    /* free resources */
+    if (munmap(mm->addr, mm->size) == -1) {
+        warn("%s", "munmap() returned with an error");
+    }
+
+    close(mm->fd);
+    free(mm);
+}
+
+
 /* load library into new namespace;
  * dlmopen() will also perform compatibility checks for us */
 static void *load_lib_new_namespace(const char *filename)
@@ -105,6 +158,7 @@ static void *load_lib_new_namespace(const char *filename)
 
     return handle;
 }
+
 
 /* retrieve full path of system library */
 static char *get_system_library_path(void)
@@ -128,6 +182,7 @@ static char *get_system_library_path(void)
 
     return path;
 }
+
 
 /* copy library from system into directory next to binary */
 static void copy_lib(const char *dir, int flag)
@@ -174,114 +229,153 @@ static void copy_lib(const char *dir, int flag)
     free(target);
 }
 
-/* find symbol by prefix */
-static char *find_symbol(const char *path, size_t length, uint8_t *addr)
-{
-#define MKVAR(TYPE, VAR, OFF) \
-    if ((OFF) >= length) { errx(1, "%s", "*** offset exceeds filesize ***"); } \
-    TYPE VAR = (TYPE)(addr + (OFF))
 
-    MKVAR( Elf_Ehdr *, ehdr, 0 );
-    MKVAR( Elf_Shdr *, shdr, ehdr->e_shoff );
-    Elf_Shdr *dyn = NULL;
+/* perform filesize check */
+static inline uint8_t *get_offset(mem_map_t *mm, size_t offset)
+{
+    if (offset >= mm->size) {
+        errx(1, "%s", "*** offset exceeds filesize ***"); \
+    }
+
+    return mm->addr + offset;
+}
+
+
+/* get section header by name */
+static Elf_Shdr *shdr_by_name(mem_map_t *mm, Elf_Ehdr *ehdr, Elf_Shdr *shdr, const char *name)
+{
     Elf_Shdr *strtab = &shdr[ehdr->e_shstrndx];
-    size_t dynstr_off = 0;
+
+    for (size_t i = 0; i < ehdr->e_shnum; i++) {
+        const char *ptr = (const char *)get_offset(mm, strtab->sh_offset + shdr[i].sh_name);
+
+        if (strcmp(ptr, name) == 0) {
+            return &shdr[i];
+        }
+    }
+
+    return NULL;
+}
+
+
+/* get section header by type */
+static Elf_Shdr *shdr_by_type(Elf_Shdr *shdr, Elf_Half shnum, Elf_Word type)
+{
+    for (Elf_Half i = 0; i < shnum; i++) {
+        if (shdr[i].sh_type == type) {
+            return &shdr[i];
+        }
+    }
+
+    return NULL;
+}
+
+
+/* get value from DT_VERDEFNUM entry */
+static size_t get_verdefnum(mem_map_t *mm, Elf_Shdr *dynamic)
+{
+    if (dynamic->sh_size == 0 || dynamic->sh_entsize == 0) {
+        return 0;
+    }
+
+    Elf_Dyn *dyn = (Elf_Dyn *)get_offset(mm, dynamic->sh_offset);
+
+    for (size_t i = 0; i < (dynamic->sh_size / dynamic->sh_entsize); i++, dyn++) {
+        if (dyn->d_tag == DT_VERDEFNUM) {
+            return dyn->d_un.d_val;
+        }
+    }
+
+    return 0;
+}
+
+
+/**
+ * find symbol in SHT_GNU_verdef section
+ * https://refspecs.linuxfoundation.org/LSB_3.0.0/LSB-PDA/LSB-PDA.junk/symversion.html
+ */
+static char *find_symbol(mem_map_t *mm)
+{
+    Elf_Ehdr *ehdr = (Elf_Ehdr *)mm->addr;
+    Elf_Shdr *shdr = (Elf_Shdr *)get_offset(mm, ehdr->e_shoff);
+
+    if (ehdr->e_type != ET_DYN) {
+        /* not a shared object file */
+        return NULL;
+    }
+
+    /* section headers */
+    Elf_Shdr *dynamic = shdr_by_name(mm, ehdr, shdr, ".dynamic");
+    Elf_Shdr *verdef = shdr_by_type(shdr, ehdr->e_shnum, SHT_GNU_verdef);
+
+    if (!dynamic || !verdef) {
+        return NULL;
+    }
+
+    /* get numbers of SHT_GNU_verdef entries from .dynamic's DT_VERDEFNUM entry */
+    size_t verdefnum = get_verdefnum(mm, dynamic);
+
+    if (verdefnum == 0) {
+        return NULL;
+    }
+
+    /* link to section that holds the strings referenced
+     * by SHT_GNU_verdef section */
+    Elf_Shdr *link = &shdr[verdef->sh_link];
+
+    /* parse SHT_GNU_verdef section */
+    size_t vd_off = verdef->sh_offset;
     const char *symbol = NULL;
 
-    /* get section header type SHT_DYNSYM */
-    for (size_t i = 0; i < ehdr->e_shnum; i++) {
-        if (shdr[i].sh_type == SHT_DYNSYM) {
-            dyn = &shdr[i];
-            break;
-        }
-    }
+    for (size_t i = 0; i < verdefnum; i++) {
+        Elf_Verdef *vd = (Elf_Verdef *)get_offset(mm, vd_off);
 
-    if (!dyn || dyn->sh_size == 0 || dyn->sh_entsize == 0) {
-        return NULL;
-    }
+        /* vd_version must be 1, skip VER_FLG_BASE entry (library name) */
+        if (vd->vd_version == 1 && vd->vd_flags != VER_FLG_BASE) {
+            /* get only the latest version instead of iterating all Elf_Verdaux entries */
+            Elf_Verdaux *vda = (Elf_Verdaux *)get_offset(mm, vd_off + vd->vd_aux);
+            const char *name = (const char *)get_offset(mm, link->sh_offset + vda->vda_name);
 
-    /* get .dynstr section */
-    for (size_t i = 0; i < ehdr->e_shnum; i++) {
-        MKVAR( const char *, name, strtab->sh_offset + shdr[i].sh_name );
+            if (strncmp(name, prefix[idx], prefix_len[idx]) == 0 && /* symbol name starts with prefix */
+                isdigit(*(name + prefix_len[idx])) &&       /* first byte after prefix is a digit */
+                strchr(name + prefix_len[idx], '.') &&      /* symbol name contains a dot */
+                (!symbol || strverscmp(symbol, name) < 0))  /* get higher version string */
+            {
+                if (full_debug_mode) {
+                    DEBUG_PRINT("%s", name);
+                }
 
-        if (strcmp(name, ".dynstr") == 0) {
-            dynstr_off = shdr[i].sh_offset;
-            break;
-        }
-    }
-
-    if (dynstr_off == 0) {
-        return NULL;
-    }
-
-    const size_t num = dyn->sh_size / dyn->sh_entsize;
-    MKVAR( Elf_Sym *, sym, dyn->sh_offset );
-
-    /* parse symbols */
-    for (size_t i = 0; i < num; i++) {
-        MKVAR( const char *, name, dynstr_off + sym[i].st_name );
-
-        if (*name == *prefix[idx] &&
-            strncmp(name, prefix[idx], prefix_len[idx]) == 0 &&    /* symbol name starts with prefix */
-            isdigit(*(name + prefix_len[idx])) &&                  /* first byte after prefix is a digit */
-            strchr(name + prefix_len[idx], '.') &&                 /* symbol name contains a dot */
-            ELF64_ST_TYPE(sym[i].st_info) == STT_OBJECT &&         /* data object */
-            ELF64_ST_BIND(sym[i].st_info) == STB_GLOBAL &&         /* global symbol */
-            ELF64_ST_VISIBILITY(sym[i].st_other) == STV_DEFAULT && /* default symbol visibility */
-            (!symbol || strverscmp(symbol, name) < 0))             /* get higher version string */
-        {
-            if (full_debug_mode) {
-                DEBUG_PRINT("%s", name);
+                symbol = name;
             }
-            symbol = name;
         }
+
+        vd_off += vd->vd_next;
     }
 
     return symbol ? strdup(symbol) : NULL;
 }
 
+
 /* mmap() library and look for symbol by prefix */
 static char *symbol_version(const char *path)
 {
-    struct stat st;
-    int fd;
-
     /* let dlmopen() do compatibility checks for us (OS/API, bitness, etc.) */
     void *handle = load_lib_new_namespace(path);
     dlclose(handle);
 
-    /* open file */
-    if ((fd = open(path, O_RDONLY)) < 0) {
-        err(1, "failed to open() file for reading: %s", path);
-    }
-
-    if (fstat(fd, &st) < 0) {
-        err(1, "fstat() failed on file: %s", path);
-    }
-
-    /* mmap() library */
-    uint8_t *addr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-
-    if (addr == MAP_FAILED) {
-        err(1, "mmap() failed: %s", path);
-    }
-
-    /* look for symbol */
-    char *symbol = find_symbol(path, st.st_size, addr);
+    /* mmap() library and look for symbol */
+    mem_map_t *mm = map_file(path);
+    char *symbol = find_symbol(mm);
 
     if (symbol) {
         DEBUG_PRINT("symbol %s found in: %s", symbol, path);
     }
 
-    /* free resources */
-    if (munmap(addr, st.st_size) == -1) {
-        warn("%s", "munmap() returned with an error");
-    }
-
-    close(fd);
+    unmap_file(mm);
 
     return symbol;
 }
+
 
 /* compare symbol versions and return true
  * if we should use the bundled library */
@@ -320,13 +414,17 @@ static bool use_bundled_library(const char *dir, int flag)
     return rv;
 }
 
+
 /* get full dirname of executable */
 static char *get_exe_dir()
 {
     char *self = realpath("/proc/self/exe", NULL);
-    if (!self) err(1, "%s", "realpath() failed to resolve /proc/self/exe");
 
-    /* modifies "self" */
+    if (!self) {
+        err(1, "%s", "realpath() failed to resolve /proc/self/exe");
+    }
+
+    /* dirname() modifies and returns "self" */
     char *pdirname = dirname(self);
 
     if (pdirname[0] != '/' || pdirname != self) {
@@ -337,6 +435,7 @@ static char *get_exe_dir()
 
     return self;
 }
+
 
 /* compare symbol versions of bundled and system libraries */
 static void compare_library_symbols()
@@ -353,6 +452,7 @@ static void compare_library_symbols()
 
     free(dir);
 }
+
 
 int main(int argc, char **argv)
 {
