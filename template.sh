@@ -71,7 +71,7 @@ cd "$APPDIR/checkrt"
 save_files
 
 LDFLAGS="-Wl,--as-needed -static-libgcc -ldl -s"
-CFLAGS="-O2 -DNDEBUG"
+CFLAGS="-O2"
 
 echo "Compiling checkrt"
 cc $CFLAGS checkrt.c -o checkrt $LDFLAGS
