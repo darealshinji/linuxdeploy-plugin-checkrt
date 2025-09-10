@@ -303,11 +303,6 @@ static char *find_symbol(mem_map_t *mm, const char *prefix)
     Elf_Ehdr *ehdr = (Elf_Ehdr *)mm->addr;
     Elf_Shdr *shdr = (Elf_Shdr *)get_offset(mm, ehdr->e_shoff);
 
-    if (ehdr->e_type != ET_DYN) {
-        /* not a shared object file */
-        return NULL;
-    }
-
     /* section headers */
     Elf_Shdr *dynamic = shdr_by_name(mm, ehdr, shdr, ".dynamic");
     Elf_Shdr *verdef = shdr_by_type(shdr, ehdr->e_shnum, SHT_GNU_verdef);
@@ -366,7 +361,7 @@ static char *find_symbol(mem_map_t *mm, const char *prefix)
 /* mmap() library and look for symbol by prefix */
 static char *symbol_version(const char *path, const char *prefix)
 {
-    /* let dlmopen() do compatibility checks for us (OS/API, bitness, etc.) */
+    /* let dlmopen() do compatibility checks for us */
     void *handle = load_lib_new_namespace(path);
     dlclose(handle);
 
