@@ -59,13 +59,6 @@ DEF(Verdaux);
 #define STDCXX_SO "libstdc++.so.6"
 
 
-typedef struct {
-    int fd;
-    size_t size;
-    uint8_t *addr;
-} mem_map_t;
-
-
 /* debug messages */
 #define DEBUG_PRINT(MSG, ...) \
     if (debug_mode) { \
@@ -77,7 +70,6 @@ static bool full_debug_mode = false;
 
 
 static void errx_dlerror(const char *filename, const char *msg) __attribute__((noreturn));
-static mem_map_t *map_file(const char *path) __attribute__((returns_nonnull));
 static void *load_lib_new_namespace(const char *filename) __attribute__((returns_nonnull));
 
 
@@ -91,45 +83,6 @@ static void errx_dlerror(const char *filename, const char *msg)
     } else {
         errx(1, "%s: %s", msg, filename);
     }
-}
-
-
-static mem_map_t *map_file(const char *path)
-{
-    struct stat st;
-    int fd;
-    uint8_t *addr;
-
-    if ((fd = open(path, O_RDONLY)) == -1) {
-        err(1, "open(): %s", path);
-    }
-
-    if (fstat(fd, &st) == -1) {
-        err(1, "fstat(): %s", path);
-    }
-
-    if ((addr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0)) == MAP_FAILED) {
-        err(1, "mmap(): %s", path);
-    }
-
-    mem_map_t *mm = malloc(sizeof(mem_map_t));
-    mm->fd = fd;
-    mm->size = st.st_size;
-    mm->addr = addr;
-
-    return mm;
-}
-
-
-static void unmap_file(mem_map_t *mm)
-{
-    /* free resources */
-    if (munmap(mm->addr, mm->size) == -1) {
-        warn("%s", "munmap() returned with an error");
-    }
-
-    close(mm->fd);
-    free(mm);
 }
 
 
@@ -218,23 +171,23 @@ static void copy_lib(const char *dir, const char *subdir, const char *libname)
 
 
 /* perform filesize check and get offset */
-static uint8_t *get_offset(mem_map_t *mm, size_t offset)
+static uint8_t *get_offset(uint8_t *addr, size_t size, size_t offset)
 {
-    if (offset >= mm->size) {
+    if (offset >= size) {
         errx(1, "%s", "*** offset exceeds filesize ***"); \
     }
 
-    return mm->addr + offset;
+    return (addr + offset);
 }
 
 
 /* get section header by name */
-static Elf_Shdr *shdr_by_name(mem_map_t *mm, Elf_Ehdr *ehdr, Elf_Shdr *shdr, const char *name)
+static Elf_Shdr *shdr_by_name(uint8_t *addr, size_t size, Elf_Ehdr *ehdr, Elf_Shdr *shdr, const char *name)
 {
     Elf_Shdr *strtab = &shdr[ehdr->e_shstrndx];
 
     for (size_t i = 0; i < ehdr->e_shnum; i++) {
-        const char *ptr = (const char *)get_offset(mm, strtab->sh_offset + shdr[i].sh_name);
+        const char *ptr = (const char *)get_offset(addr, size, strtab->sh_offset + shdr[i].sh_name);
 
         if (strcmp(ptr, name) == 0) {
             return &shdr[i];
@@ -259,13 +212,13 @@ static Elf_Shdr *shdr_by_type(Elf_Shdr *shdr, Elf_Half shnum, Elf_Word type)
 
 
 /* get value from DT_VERDEFNUM entry */
-static size_t get_verdefnum(mem_map_t *mm, Elf_Shdr *dynamic)
+static size_t get_verdefnum(uint8_t *addr, size_t size, Elf_Shdr *dynamic)
 {
     if (dynamic->sh_size == 0 || dynamic->sh_entsize == 0) {
         return 0;
     }
 
-    Elf_Dyn *dyn = (Elf_Dyn *)get_offset(mm, dynamic->sh_offset);
+    Elf_Dyn *dyn = (Elf_Dyn *)get_offset(addr, size, dynamic->sh_offset);
 
     for (size_t i = 0; i < (dynamic->sh_size / dynamic->sh_entsize); i++, dyn++) {
         if (dyn->d_tag == DT_VERDEFNUM) {
@@ -298,13 +251,13 @@ static size_t get_verdefnum(mem_map_t *mm, Elf_Shdr *dynamic)
  * It's a relative offset into the section previously obtained from the sh_link
  * entry and points to a NUL-termintated string.
  */
-static char *find_symbol(mem_map_t *mm, const char *prefix)
+static char *find_symbol(uint8_t *addr, size_t size, const char *prefix)
 {
-    Elf_Ehdr *ehdr = (Elf_Ehdr *)mm->addr;
-    Elf_Shdr *shdr = (Elf_Shdr *)get_offset(mm, ehdr->e_shoff);
+    Elf_Ehdr *ehdr = (Elf_Ehdr *)addr;
+    Elf_Shdr *shdr = (Elf_Shdr *)get_offset(addr, size, ehdr->e_shoff);
 
     /* section headers */
-    Elf_Shdr *dynamic = shdr_by_name(mm, ehdr, shdr, ".dynamic");
+    Elf_Shdr *dynamic = shdr_by_name(addr, size, ehdr, shdr, ".dynamic");
     Elf_Shdr *verdef = shdr_by_type(shdr, ehdr->e_shnum, SHT_GNU_verdef);
 
     if (!dynamic || !verdef) {
@@ -312,7 +265,7 @@ static char *find_symbol(mem_map_t *mm, const char *prefix)
     }
 
     /* get numbers of SHT_GNU_verdef entries from .dynamic's DT_VERDEFNUM entry */
-    size_t verdefnum = get_verdefnum(mm, dynamic);
+    size_t verdefnum = get_verdefnum(addr, size, dynamic);
 
     if (verdefnum == 0) {
         return NULL;
@@ -328,15 +281,15 @@ static char *find_symbol(mem_map_t *mm, const char *prefix)
     const size_t pfxlen = strlen(prefix);
 
     for (size_t i = 0; i < verdefnum; i++) {
-        Elf_Verdef *vd = (Elf_Verdef *)get_offset(mm, vd_off);
+        Elf_Verdef *vd = (Elf_Verdef *)get_offset(addr, size, vd_off);
 
         if (vd->vd_version == 1 &&             /* must be 1 */
             vd->vd_flags != VER_FLG_BASE &&    /* skip library name entry */
             vd->vd_aux >= sizeof(Elf_Verdef))  /* placed after Elf_Verdef array */
         {
             /* get only the latest version instead of iterating all Elf_Verdaux entries */
-            Elf_Verdaux *vda = (Elf_Verdaux *)get_offset(mm, vd_off + vd->vd_aux);
-            const char *name = (const char *)get_offset(mm, strings->sh_offset + vda->vda_name);
+            Elf_Verdaux *vda = (Elf_Verdaux *)get_offset(addr, size, vd_off + vd->vd_aux);
+            const char *name = (const char *)get_offset(addr, size, strings->sh_offset + vda->vda_name);
 
             if (strncmp(name, prefix, pfxlen) == 0 &&  /* symbol name starts with prefix */
                 isdigit(*(name + pfxlen)) &&           /* first byte after prefix is a digit */
@@ -361,19 +314,41 @@ static char *find_symbol(mem_map_t *mm, const char *prefix)
 /* mmap() library and look for symbol by prefix */
 static char *symbol_version(const char *path, const char *prefix)
 {
+    struct stat st;
+    int fd;
+    uint8_t *addr;
+
     /* let dlmopen() do compatibility checks for us */
     void *handle = load_lib_new_namespace(path);
     dlclose(handle);
 
-    /* mmap() library and look for symbol */
-    mem_map_t *mm = map_file(path);
-    char *symbol = find_symbol(mm, prefix);
+    /* mmap() library */
+    if ((fd = open(path, O_RDONLY)) == -1) {
+        err(1, "open(): %s", path);
+    }
+
+    if (fstat(fd, &st) == -1) {
+        err(1, "fstat(): %s", path);
+    }
+
+    if ((addr = mmap(NULL, st.st_size, PROT_READ, MAP_SHARED, fd, 0)) == MAP_FAILED) {
+        err(1, "mmap(): %s", path);
+    }
+
+    /* file descriptor can now be closed */
+    close(fd);
+
+    /* look for symbol */
+    char *symbol = find_symbol(addr, st.st_size, prefix);
 
     if (symbol) {
         DEBUG_PRINT("symbol %s found in: %s", symbol, path);
     }
 
-    unmap_file(mm);
+    /* unmap */
+    if (munmap(addr, st.st_size) == -1) {
+        warn("%s", "munmap() returned with an error");
+    }
 
     return symbol;
 }
