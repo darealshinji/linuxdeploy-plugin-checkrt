@@ -48,6 +48,8 @@
 
 DEF(Half);
 DEF(Word);
+DEF(Sword);
+DEF(Off);
 DEF(Ehdr);
 DEF(Shdr);
 DEF(Dyn);
@@ -171,7 +173,7 @@ static void copy_lib(const char *dir, const char *subdir, const char *libname)
 
 
 /* perform filesize check and get offset */
-static uint8_t *get_offset(uint8_t *addr, size_t size, size_t offset)
+static uint8_t *get_offset(uint8_t *addr, size_t size, Elf_Off offset)
 {
     if (offset >= size) {
         errx(1, "%s", "*** offset exceeds filesize ***"); \
@@ -211,8 +213,8 @@ static Elf_Shdr *shdr_by_type(Elf_Shdr *shdr, Elf_Half shnum, Elf_Word type)
 }
 
 
-/* get value from DT_VERDEFNUM entry */
-static size_t get_verdefnum(uint8_t *addr, size_t size, Elf_Shdr *dynamic)
+/* get dynamic entry value by tag */
+static size_t get_dyn_val(uint8_t *addr, size_t size, Elf_Shdr *dynamic, Elf_Sword tag)
 {
     if (dynamic->sh_size == 0 || dynamic->sh_entsize == 0) {
         return 0;
@@ -221,7 +223,7 @@ static size_t get_verdefnum(uint8_t *addr, size_t size, Elf_Shdr *dynamic)
     Elf_Dyn *dyn = (Elf_Dyn *)get_offset(addr, size, dynamic->sh_offset);
 
     for (size_t i = 0; i < (dynamic->sh_size / dynamic->sh_entsize); i++, dyn++) {
-        if (dyn->d_tag == DT_VERDEFNUM) {
+        if (dyn->d_tag == tag) {
             return dyn->d_un.d_val;
         }
     }
@@ -253,30 +255,31 @@ static size_t get_verdefnum(uint8_t *addr, size_t size, Elf_Shdr *dynamic)
  */
 static char *find_symbol(uint8_t *addr, size_t size, const char *prefix)
 {
+    Elf_Shdr *dynamic, *verdef;
+    size_t verdefnum;
+
     Elf_Ehdr *ehdr = (Elf_Ehdr *)addr;
     Elf_Shdr *shdr = (Elf_Shdr *)get_offset(addr, size, ehdr->e_shoff);
 
-    /* section headers */
-    Elf_Shdr *dynamic = shdr_by_name(addr, size, ehdr, shdr, ".dynamic");
-    Elf_Shdr *verdef = shdr_by_type(shdr, ehdr->e_shnum, SHT_GNU_verdef);
-
-    if (!dynamic || !verdef) {
-        return NULL;
-    }
-
     /* get numbers of SHT_GNU_verdef entries from .dynamic's DT_VERDEFNUM entry */
-    size_t verdefnum = get_verdefnum(addr, size, dynamic);
-
-    if (verdefnum == 0) {
+    if ((dynamic = shdr_by_name(addr, size, ehdr, shdr, ".dynamic")) == NULL ||
+        (verdefnum = get_dyn_val(addr, size, dynamic, DT_VERDEFNUM)) == 0)
+    {
         return NULL;
     }
 
-    /* link to section that holds the strings referenced
+    /* get link to section that holds the strings referenced
      * by SHT_GNU_verdef section */
+    if ((verdef = shdr_by_type(shdr, ehdr->e_shnum, SHT_GNU_verdef)) == NULL ||
+        verdef->sh_link >= ehdr->e_shnum)
+    {
+        return NULL;
+    }
+
     Elf_Shdr *strings = &shdr[verdef->sh_link];
 
     /* parse SHT_GNU_verdef section */
-    size_t vd_off = verdef->sh_offset;
+    Elf_Off vd_off = verdef->sh_offset;
     const char *symbol = NULL;
     const size_t pfxlen = strlen(prefix);
 
