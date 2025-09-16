@@ -173,7 +173,7 @@ static void copy_lib(const char *dir, const char *subdir, const char *libname)
 
 
 /* perform filesize check and get offset */
-static uint8_t *get_offset(uint8_t *addr, size_t size, Elf_Off offset)
+static void *get_offset(void *addr, size_t size, Elf_Off offset)
 {
     if (offset >= size) {
         errx(1, "%s", "*** offset exceeds filesize ***"); \
@@ -184,12 +184,12 @@ static uint8_t *get_offset(uint8_t *addr, size_t size, Elf_Off offset)
 
 
 /* get section header by name */
-static Elf_Shdr *shdr_by_name(uint8_t *addr, size_t size, Elf_Ehdr *ehdr, Elf_Shdr *shdr, const char *name)
+static Elf_Shdr *shdr_by_name(void *addr, size_t size, Elf_Ehdr *ehdr, Elf_Shdr *shdr, const char *name)
 {
     Elf_Shdr *strtab = &shdr[ehdr->e_shstrndx];
 
     for (size_t i = 0; i < ehdr->e_shnum; i++) {
-        const char *ptr = (const char *)get_offset(addr, size, strtab->sh_offset + shdr[i].sh_name);
+        const char *ptr = get_offset(addr, size, strtab->sh_offset + shdr[i].sh_name);
 
         if (strcmp(ptr, name) == 0) {
             return &shdr[i];
@@ -214,13 +214,13 @@ static Elf_Shdr *shdr_by_type(Elf_Shdr *shdr, Elf_Half shnum, Elf_Word type)
 
 
 /* get dynamic entry value by tag */
-static size_t get_dyn_val(uint8_t *addr, size_t size, Elf_Shdr *dynamic, Elf_Sword tag)
+static size_t get_dyn_val(void *addr, size_t size, Elf_Shdr *dynamic, Elf_Sword tag)
 {
     if (dynamic->sh_size == 0 || dynamic->sh_entsize == 0) {
         return 0;
     }
 
-    Elf_Dyn *dyn = (Elf_Dyn *)get_offset(addr, size, dynamic->sh_offset);
+    Elf_Dyn *dyn = get_offset(addr, size, dynamic->sh_offset);
 
     for (size_t i = 0; i < (dynamic->sh_size / dynamic->sh_entsize); i++, dyn++) {
         if (dyn->d_tag == tag) {
@@ -253,13 +253,13 @@ static size_t get_dyn_val(uint8_t *addr, size_t size, Elf_Shdr *dynamic, Elf_Swo
  * It's a relative offset into the section previously obtained from the sh_link
  * entry and points to a NUL-termintated string.
  */
-static char *find_symbol(uint8_t *addr, size_t size, const char *prefix)
+static char *find_symbol(void *addr, size_t size, const char *prefix)
 {
     Elf_Shdr *dynamic, *verdef;
     size_t verdefnum;
 
-    Elf_Ehdr *ehdr = (Elf_Ehdr *)addr;
-    Elf_Shdr *shdr = (Elf_Shdr *)get_offset(addr, size, ehdr->e_shoff);
+    Elf_Ehdr *ehdr = addr;
+    Elf_Shdr *shdr = get_offset(addr, size, ehdr->e_shoff);
 
     /* get numbers of SHT_GNU_verdef entries from .dynamic's DT_VERDEFNUM entry */
     if ((dynamic = shdr_by_name(addr, size, ehdr, shdr, ".dynamic")) == NULL ||
@@ -284,15 +284,15 @@ static char *find_symbol(uint8_t *addr, size_t size, const char *prefix)
     const size_t pfxlen = strlen(prefix);
 
     for (size_t i = 0; i < verdefnum; i++) {
-        Elf_Verdef *vd = (Elf_Verdef *)get_offset(addr, size, vd_off);
+        Elf_Verdef *vd = get_offset(addr, size, vd_off);
 
         if (vd->vd_version == 1 &&             /* must be 1 */
             vd->vd_flags != VER_FLG_BASE &&    /* skip library name entry */
             vd->vd_aux >= sizeof(Elf_Verdef))  /* placed after Elf_Verdef array */
         {
             /* get only the latest version instead of iterating all Elf_Verdaux entries */
-            Elf_Verdaux *vda = (Elf_Verdaux *)get_offset(addr, size, vd_off + vd->vd_aux);
-            const char *name = (const char *)get_offset(addr, size, strings->sh_offset + vda->vda_name);
+            Elf_Verdaux *vda = get_offset(addr, size, vd_off + vd->vd_aux);
+            const char *name = get_offset(addr, size, strings->sh_offset + vda->vda_name);
 
             if (strncmp(name, prefix, pfxlen) == 0 &&  /* symbol name starts with prefix */
                 isdigit(*(name + pfxlen)) &&           /* first byte after prefix is a digit */
@@ -319,7 +319,7 @@ static char *symbol_version(const char *path, const char *prefix)
 {
     struct stat st;
     int fd;
-    uint8_t *addr;
+    void *addr;
 
     /* let dlmopen() do compatibility checks for us */
     void *handle = load_lib_new_namespace(path);
