@@ -17,4 +17,5 @@ chmod a+x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-checkrt.sh
 "$GCC_PREFIX/bin/g++" -O2 example.cpp -o example -s
 
 export LD_LIBRARY_PATH="$GCC_PREFIX/lib64:$GCC_PREFIX/lib:$LD_LIBRARY_PATH"
-VERSION=1 ./linuxdeploy-x86_64.AppImage --appdir=appdir -pcheckrt -oappimage -eexample -iexample.png -dexample.desktop
+export LINUXDEPLOY_OUTPUT_VERSION=1
+./linuxdeploy-x86_64.AppImage --appdir=appdir -pcheckrt -oappimage -eexample -iexample.png -dexample.desktop
