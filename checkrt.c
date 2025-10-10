@@ -41,20 +41,10 @@
 
 
 #if defined(_LP64) || defined(__LP64__)
-#define DEF(x) typedef Elf64_##x Elf_##x
+#define ElfW(x) Elf64_##x
 #else
-#define DEF(x) typedef Elf32_##x Elf_##x
+#define ElfW(x) Elf32_##x
 #endif
-
-DEF(Half);
-DEF(Word);
-DEF(Sword);
-DEF(Off);
-DEF(Ehdr);
-DEF(Shdr);
-DEF(Dyn);
-DEF(Verdef);
-DEF(Verdaux);
 
 
 #define LIBGCC_SO "libgcc_s.so.1"
@@ -173,7 +163,7 @@ static void copy_lib(const char *dir, const char *subdir, const char *libname)
 
 
 /* perform filesize check and get offset */
-static void *get_offset(void *addr, size_t size, Elf_Off offset)
+static void *get_offset(void *addr, size_t size, ElfW(Off) offset)
 {
     if (offset >= size) {
         errx(1, "%s", "*** offset exceeds filesize ***"); \
@@ -184,9 +174,9 @@ static void *get_offset(void *addr, size_t size, Elf_Off offset)
 
 
 /* get section header by name */
-static Elf_Shdr *shdr_by_name(void *addr, size_t size, Elf_Ehdr *ehdr, Elf_Shdr *shdr, const char *name)
+static ElfW(Shdr) *shdr_by_name(void *addr, size_t size, ElfW(Ehdr) *ehdr, ElfW(Shdr) *shdr, const char *name)
 {
-    Elf_Shdr *strtab = &shdr[ehdr->e_shstrndx];
+    ElfW(Shdr) *strtab = &shdr[ehdr->e_shstrndx];
 
     for (size_t i = 0; i < ehdr->e_shnum; i++) {
         const char *ptr = get_offset(addr, size, strtab->sh_offset + shdr[i].sh_name);
@@ -201,9 +191,9 @@ static Elf_Shdr *shdr_by_name(void *addr, size_t size, Elf_Ehdr *ehdr, Elf_Shdr 
 
 
 /* get section header by type */
-static Elf_Shdr *shdr_by_type(Elf_Shdr *shdr, Elf_Half shnum, Elf_Word type)
+static ElfW(Shdr) *shdr_by_type(ElfW(Shdr) *shdr, ElfW(Half) shnum, ElfW(Word) type)
 {
-    for (Elf_Half i = 0; i < shnum; i++) {
+    for (ElfW(Half) i = 0; i < shnum; i++) {
         if (shdr[i].sh_type == type) {
             return &shdr[i];
         }
@@ -214,13 +204,13 @@ static Elf_Shdr *shdr_by_type(Elf_Shdr *shdr, Elf_Half shnum, Elf_Word type)
 
 
 /* get dynamic entry value by tag */
-static size_t get_dyn_val(void *addr, size_t size, Elf_Shdr *dynamic, Elf_Sword tag)
+static size_t get_dyn_val(void *addr, size_t size, ElfW(Shdr) *dynamic, ElfW(Sword) tag)
 {
     if (dynamic->sh_size == 0 || dynamic->sh_entsize == 0) {
         return 0;
     }
 
-    Elf_Dyn *dyn = get_offset(addr, size, dynamic->sh_offset);
+    ElfW(Dyn) *dyn = get_offset(addr, size, dynamic->sh_offset);
 
     for (size_t i = 0; i < (dynamic->sh_size / dynamic->sh_entsize); i++, dyn++) {
         if (dyn->d_tag == tag) {
@@ -255,11 +245,11 @@ static size_t get_dyn_val(void *addr, size_t size, Elf_Shdr *dynamic, Elf_Sword 
  */
 static char *find_symbol(void *addr, size_t size, const char *prefix)
 {
-    Elf_Shdr *dynamic, *verdef;
+    ElfW(Shdr) *dynamic, *verdef;
     size_t verdefnum;
 
-    Elf_Ehdr *ehdr = addr;
-    Elf_Shdr *shdr = get_offset(addr, size, ehdr->e_shoff);
+    ElfW(Ehdr) *ehdr = addr;
+    ElfW(Shdr) *shdr = get_offset(addr, size, ehdr->e_shoff);
 
     /* get numbers of SHT_GNU_verdef entries from .dynamic's DT_VERDEFNUM entry */
     if ((dynamic = shdr_by_name(addr, size, ehdr, shdr, ".dynamic")) == NULL ||
@@ -276,22 +266,22 @@ static char *find_symbol(void *addr, size_t size, const char *prefix)
         return NULL;
     }
 
-    Elf_Shdr *strings = &shdr[verdef->sh_link];
+    ElfW(Shdr) *strings = &shdr[verdef->sh_link];
 
     /* parse SHT_GNU_verdef section */
-    Elf_Off vd_off = verdef->sh_offset;
+    ElfW(Off) vd_off = verdef->sh_offset;
     const char *symbol = NULL;
     const size_t pfxlen = strlen(prefix);
 
     for (size_t i = 0; i < verdefnum; i++) {
-        Elf_Verdef *vd = get_offset(addr, size, vd_off);
+        ElfW(Verdef) *vd = get_offset(addr, size, vd_off);
 
         if (vd->vd_version == 1 &&             /* must be 1 */
             vd->vd_flags != VER_FLG_BASE &&    /* skip library name entry */
-            vd->vd_aux >= sizeof(Elf_Verdef))  /* placed after Elf_Verdef array */
+            vd->vd_aux >= sizeof(ElfW(Verdef)))  /* placed after ElfW(Verdef) array */
         {
-            /* get only the latest version instead of iterating all Elf_Verdaux entries */
-            Elf_Verdaux *vda = get_offset(addr, size, vd_off + vd->vd_aux);
+            /* get only the latest version instead of iterating all ElfXX_Verdaux entries */
+            ElfW(Verdaux) *vda = get_offset(addr, size, vd_off + vd->vd_aux);
             const char *name = get_offset(addr, size, strings->sh_offset + vda->vda_name);
 
             if (strncmp(name, prefix, pfxlen) == 0 &&  /* symbol name starts with prefix */
