@@ -59,8 +59,14 @@
         fprintf(stderr, "[DEBUG] %s: " MSG "\n", __func__, __VA_ARGS__); \
     }
 
+
+/* global variables */
 static bool debug_mode = false;
 static bool full_debug_mode = false;
+static void *addr = MAP_FAILED;
+static size_t size = 0;
+static ElfW(Ehdr) *ehdr = NULL;
+static ElfW(Shdr) *shdr = NULL;
 
 
 static void errx_dlerror(const char *filename, const char *msg) __attribute__((noreturn));
@@ -165,7 +171,7 @@ static void copy_lib(const char *dir, const char *subdir, const char *libname)
 
 
 /* perform filesize check and get offset */
-static void *get_offset(void *addr, size_t size, ElfW(Off) offset)
+static void *get_offset(ElfW(Off) offset)
 {
     if (offset >= size) {
         errx(1, "%s", "*** offset exceeds filesize ***"); \
@@ -176,7 +182,7 @@ static void *get_offset(void *addr, size_t size, ElfW(Off) offset)
 
 
 /* get section header by name */
-static ElfW(Shdr) *get_shdr(void *addr, size_t size, ElfW(Ehdr) *ehdr, ElfW(Shdr) *shdr, ElfW(Word) type, const char *name)
+static ElfW(Shdr) *get_shdr(ElfW(Word) type, const char *name)
 {
     ElfW(Shdr) *strtab = &shdr[ehdr->e_shstrndx];
 
@@ -185,7 +191,7 @@ static ElfW(Shdr) *get_shdr(void *addr, size_t size, ElfW(Ehdr) *ehdr, ElfW(Shdr
             continue;
         }
 
-        const char *ptr = get_offset(addr, size, strtab->sh_offset + shdr[i].sh_name);
+        const char *ptr = get_offset(strtab->sh_offset + shdr[i].sh_name);
 
         if (strcmp(ptr, name) == 0) {
             return &shdr[i];
@@ -197,13 +203,13 @@ static ElfW(Shdr) *get_shdr(void *addr, size_t size, ElfW(Ehdr) *ehdr, ElfW(Shdr
 
 
 /* get dynamic entry value by tag */
-static size_t get_dyn_val(void *addr, size_t size, ElfW(Shdr) *dynamic, ElfW(Sword) tag)
+static size_t get_dyn_val(ElfW(Shdr) *dynamic, ElfW(Sword) tag)
 {
     if (dynamic->sh_size == 0 || dynamic->sh_entsize == 0) {
         return 0;
     }
 
-    ElfW(Dyn) *dyn = get_offset(addr, size, dynamic->sh_offset);
+    ElfW(Dyn) *dyn = get_offset(dynamic->sh_offset);
 
     for (size_t i = 0; i < (dynamic->sh_size / dynamic->sh_entsize); i++, dyn++) {
         if (dyn->d_tag == tag) {
@@ -245,23 +251,20 @@ static bool is_prefixed_and_higher_version(const char *new, const char *old, con
  * It's a relative offset into the section previously obtained from the sh_link
  * entry and points to a NUL-termintated string.
  */
-static char *find_symbol(void *addr, size_t size, const char *prefix)
+static char *find_symbol(const char *prefix)
 {
     size_t verdefnum;
 
-    ElfW(Ehdr) *ehdr = addr;
-    ElfW(Shdr) *shdr = get_offset(addr, size, ehdr->e_shoff);
-
     /* get numbers of .gnu.version_d entries from .dynamic's DT_VERDEFNUM entry */
-    ElfW(Shdr) *dynamic = get_shdr(addr, size, ehdr, shdr, SHT_DYNAMIC, ".dynamic");
+    ElfW(Shdr) *dynamic = get_shdr(SHT_DYNAMIC, ".dynamic");
 
-    if (!dynamic || (verdefnum = get_dyn_val(addr, size, dynamic, DT_VERDEFNUM)) == 0) {
+    if (!dynamic || (verdefnum = get_dyn_val(dynamic, DT_VERDEFNUM)) == 0) {
         return NULL;
     }
 
     /* get link to section that holds the strings referenced
      * by .gnu.version_d section */
-    ElfW(Shdr) *verdef = get_shdr(addr, size, ehdr, shdr, SHT_GNU_verdef, ".gnu.version_d");
+    ElfW(Shdr) *verdef = get_shdr(SHT_GNU_verdef, ".gnu.version_d");
 
     if (!verdef || verdef->sh_link >= ehdr->e_shnum) {
         return NULL;
@@ -275,15 +278,15 @@ static char *find_symbol(void *addr, size_t size, const char *prefix)
     const size_t pfxlen = strlen(prefix);
 
     for (size_t i = 0; i < verdefnum; i++) {
-        ElfW(Verdef) *vd = get_offset(addr, size, vd_off);
+        ElfW(Verdef) *vd = get_offset(vd_off);
 
         if (vd->vd_version == 1 &&               /* must be 1 */
             vd->vd_flags != VER_FLG_BASE &&      /* skip library name entry */
             vd->vd_aux >= sizeof(ElfW(Verdef)))  /* placed after ElfW(Verdef) array */
         {
             /* get only the latest version instead of iterating all ElfXX_Verdaux entries */
-            ElfW(Verdaux) *vda = get_offset(addr, size, vd_off + vd->vd_aux);
-            const char *name = get_offset(addr, size, strings->sh_offset + vda->vda_name);
+            ElfW(Verdaux) *vda = get_offset(vd_off + vd->vd_aux);
+            const char *name = get_offset(strings->sh_offset + vda->vda_name);
 
             if (is_prefixed_and_higher_version(name, symbol, prefix, pfxlen)) {
                 if (full_debug_mode) {
@@ -306,7 +309,6 @@ static char *symbol_version(const char *path, const char *prefix)
 {
     struct stat st;
     int fd;
-    void *addr;
 
     /* let dlmopen() do compatibility checks for us */
     void *handle = load_lib_new_namespace(path);
@@ -328,15 +330,20 @@ static char *symbol_version(const char *path, const char *prefix)
     /* file descriptor can now be closed */
     close(fd);
 
+    /* set global variables */
+    size = st.st_size;
+    ehdr = addr;
+    shdr = get_offset(ehdr->e_shoff);
+
     /* look for symbol */
-    char *symbol = find_symbol(addr, st.st_size, prefix);
+    char *symbol = find_symbol(prefix);
 
     if (symbol) {
         DEBUG_PRINT("symbol %s found in: %s", symbol, path);
     }
 
     /* unmap */
-    if (munmap(addr, st.st_size) == -1) {
+    if (munmap(addr, size) == -1) {
         warn("%s", "munmap() returned with an error");
     }
 
