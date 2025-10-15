@@ -215,6 +215,15 @@ static size_t get_dyn_val(void *addr, size_t size, ElfW(Shdr) *dynamic, ElfW(Swo
 }
 
 
+static bool is_prefixed_and_higher_version(const char *new, const char *old, const char *prefix, size_t pfxlen)
+{
+    return (strncmp(new, prefix, pfxlen) == 0 &&  /* symbol name starts with prefix */
+            isdigit(*(new + pfxlen)) &&           /* first byte after prefix is a digit */
+            strchr(new + pfxlen, '.') &&          /* symbol name contains a dot */
+            (!old || strverscmp(old, new) < 0));  /* get higher version string */
+}
+
+
 /**
  * Find symbol in SHT_GNU_verdef section
  * https://refspecs.linuxfoundation.org/LSB_3.0.0/LSB-PDA/LSB-PDA.junk/symversion.html
@@ -276,11 +285,7 @@ static char *find_symbol(void *addr, size_t size, const char *prefix)
             ElfW(Verdaux) *vda = get_offset(addr, size, vd_off + vd->vd_aux);
             const char *name = get_offset(addr, size, strings->sh_offset + vda->vda_name);
 
-            if (strncmp(name, prefix, pfxlen) == 0 &&  /* symbol name starts with prefix */
-                isdigit(*(name + pfxlen)) &&           /* first byte after prefix is a digit */
-                strchr(name + pfxlen, '.') &&          /* symbol name contains a dot */
-                (!symbol || strverscmp(symbol, name) < 0))  /* get higher version string */
-            {
+            if (is_prefixed_and_higher_version(name, symbol, prefix, pfxlen)) {
                 if (full_debug_mode) {
                     DEBUG_PRINT("%s", name);
                 }
@@ -386,7 +391,7 @@ static char *get_exe_dir()
     /* dirname() modifies and returns "self" */
     char *pdirname = dirname(self);
 
-    if (pdirname[0] != '/' || pdirname != self) {
+    if (pdirname != self || pdirname[0] != '/') {
         errx(1, "dirname() returned an unexpected result: %s", pdirname);
     }
 
