@@ -40,23 +40,46 @@
 #include <unistd.h>
 
 
-#ifndef ElfW
-# if defined(_LP64) || defined(__LP64__)
-#  define ElfW(x) Elf64_##x
-# else
-#  define ElfW(x) Elf32_##x
-# endif
+/* enable terminal colors to make the debug
+ * output more pleasent to read */
+#define ENABLE_COLORS 1
+
+
+/* library names */
+#define LIBGCC_SO  "libgcc_s.so.1"
+#define STDCXX_SO  "libstdc++.so.6"
+
+
+/* terminal-colors.d(5) */
+#define STR(x) #x
+
+#ifdef ENABLE_COLORS
+#define COL(a, b)  "\033[" STR(a) ";" STR(b) "m%s\033[m"
+#else
+#define COL(...)   "%s"
 #endif
 
+#define BLACK   30
+#define RED     31
+#define GREEN   32
+#define YELLOW  33
+#define BLUE    34
+#define PURPLE  35
+#define CYAN    36
+#define GRAY    37
 
-#define LIBGCC_SO "libgcc_s.so.1"
-#define STDCXX_SO "libstdc++.so.6"
+#define COL_FUNC  COL(0, YELLOW)
+#define COL_LIB   COL(0, PURPLE)
+#define COL_PATH  COL(0, GREEN)
+#define COL_RES   COL(0, CYAN)
+#define COL_SYS   COL(1, RED)
+#define COL_XLIB  COL(1, GREEN)
 
 
 /* debug messages */
 #define DEBUG_PRINT(MSG, ...) \
     if (debug_mode) { \
-        fprintf(stderr, "[DEBUG] %s: " MSG "\n", __func__, __VA_ARGS__); \
+        fprintf(stderr, "[DEBUG] " COL_FUNC ": " MSG "\n", __func__, __VA_ARGS__); \
     }
 
 
@@ -115,7 +138,7 @@ static char *get_system_library_path(const char *filename)
     }
 
     char *path = strdup(map->l_name);
-    DEBUG_PRINT("%s resolved to: %s", filename, path);
+    DEBUG_PRINT(COL_LIB " resolved to: " COL_PATH, filename, path);
 
     dlclose(handle);
 
@@ -290,7 +313,7 @@ static char *find_symbol(const char *prefix)
 
             if (is_prefixed_and_higher_version(name, symbol, prefix, pfxlen)) {
                 if (full_debug_mode) {
-                    DEBUG_PRINT("%s", name);
+                    DEBUG_PRINT(COL_RES, name);
                 }
 
                 symbol = name;
@@ -305,7 +328,7 @@ static char *find_symbol(const char *prefix)
 
 
 /* mmap() library and look for symbol by prefix */
-static char *symbol_version(const char *path, const char *prefix)
+static char *symbol_version(const char *path, const char *prefix, const char *msg)
 {
     struct stat st;
     int fd;
@@ -336,10 +359,12 @@ static char *symbol_version(const char *path, const char *prefix)
     shdr = get_offset(ehdr->e_shoff);
 
     /* look for symbol */
+    DEBUG_PRINT("searching " COL_XLIB " library: " COL_PATH, msg, path);
+
     char *symbol = find_symbol(prefix);
 
     if (symbol) {
-        DEBUG_PRINT("symbol %s found in: %s", symbol, path);
+        DEBUG_PRINT("symbol " COL_RES " found", symbol);
     }
 
     /* unmap */
@@ -363,9 +388,9 @@ static bool use_bundled_library(const char *dir, const char *subdir, const char 
     /* check if bundled file exists */
     if (access(lib_bundle, F_OK) == 0) {
         /* get symbols */
-        char *sym_bundle = symbol_version(lib_bundle, prefix);
+        char *sym_bundle = symbol_version(lib_bundle, prefix, "bundled");
         char *lib_sys = get_system_library_path(libname);
-        char *sym_sys = symbol_version(lib_sys, prefix);
+        char *sym_sys = symbol_version(lib_sys, prefix, "system");
 
         /* compare symbols */
         if (sym_bundle && sym_sys && strverscmp(sym_bundle, sym_sys) > 0) {
@@ -376,10 +401,10 @@ static bool use_bundled_library(const char *dir, const char *subdir, const char 
         free(sym_sys);
         free(sym_bundle);
     } else {
-        DEBUG_PRINT("no access or file does not exist: %s", lib_bundle);
+        DEBUG_PRINT("no access or file does not exist: " COL_PATH, lib_bundle);
     }
 
-    DEBUG_PRINT("use %s %s library", rv ? "BUNDLED" : "SYSTEM", libname);
+    DEBUG_PRINT("use " COL_SYS " " COL_LIB " library", rv ? "BUNDLED" : "SYSTEM", libname);
     free(lib_bundle);
 
     return rv;
@@ -402,7 +427,7 @@ static char *get_exe_dir()
         errx(1, "dirname() returned an unexpected result: %s", pdirname);
     }
 
-    DEBUG_PRINT("exe directory found at: %s", self);
+    DEBUG_PRINT("exe directory found at: " COL_PATH, self);
 
     return self;
 }
@@ -452,7 +477,8 @@ int main(int argc, char **argv)
 
     char *env = getenv("CHECKRT_DEBUG");
 
-    if (env) {
+    if (env && *env) {
+        /* environment variable is non-empty */
         if (strcasecmp(env, "full") == 0) {
             full_debug_mode = true;
         }

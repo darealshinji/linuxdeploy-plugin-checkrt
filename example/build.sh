@@ -11,7 +11,12 @@ set -e
 set -x
 
 wget -c "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
-cp -f ../linuxdeploy-plugin-checkrt.sh .
+
+cd ..
+./generate.sh
+cp -f linuxdeploy-plugin-checkrt.sh example
+cd example
+
 chmod a+x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-checkrt.sh
 
 "$GCC_PREFIX/bin/g++" -O2 example.cpp -o example -s

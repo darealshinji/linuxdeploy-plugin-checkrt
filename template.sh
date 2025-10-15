@@ -60,8 +60,8 @@ fi
 
 # debugging
 if [ -n "$CHECKRT_DEBUG" ]; then
-    echo "CHECKRT>> LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-    echo "CHECKRT>> LD_PRELOAD=$LD_PRELOAD"
+    echo "[DEBUG] LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+    echo "[DEBUG] LD_PRELOAD=$LD_PRELOAD"
 fi
 EOF
 
