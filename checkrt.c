@@ -40,10 +40,12 @@
 #include <unistd.h>
 
 
-#if defined(_LP64) || defined(__LP64__)
-#define ElfW(x) Elf64_##x
-#else
-#define ElfW(x) Elf32_##x
+#ifndef ElfW
+# if defined(_LP64) || defined(__LP64__)
+#  define ElfW(x) Elf64_##x
+# else
+#  define ElfW(x) Elf32_##x
+# endif
 #endif
 
 
@@ -174,27 +176,18 @@ static void *get_offset(void *addr, size_t size, ElfW(Off) offset)
 
 
 /* get section header by name */
-static ElfW(Shdr) *shdr_by_name(void *addr, size_t size, ElfW(Ehdr) *ehdr, ElfW(Shdr) *shdr, const char *name)
+static ElfW(Shdr) *get_shdr(void *addr, size_t size, ElfW(Ehdr) *ehdr, ElfW(Shdr) *shdr, ElfW(Word) type, const char *name)
 {
     ElfW(Shdr) *strtab = &shdr[ehdr->e_shstrndx];
 
     for (size_t i = 0; i < ehdr->e_shnum; i++) {
+        if (shdr[i].sh_type != type) {
+            continue;
+        }
+
         const char *ptr = get_offset(addr, size, strtab->sh_offset + shdr[i].sh_name);
 
         if (strcmp(ptr, name) == 0) {
-            return &shdr[i];
-        }
-    }
-
-    return NULL;
-}
-
-
-/* get section header by type */
-static ElfW(Shdr) *shdr_by_type(ElfW(Shdr) *shdr, ElfW(Half) shnum, ElfW(Word) type)
-{
-    for (ElfW(Half) i = 0; i < shnum; i++) {
-        if (shdr[i].sh_type == type) {
             return &shdr[i];
         }
     }
@@ -245,30 +238,29 @@ static size_t get_dyn_val(void *addr, size_t size, ElfW(Shdr) *dynamic, ElfW(Swo
  */
 static char *find_symbol(void *addr, size_t size, const char *prefix)
 {
-    ElfW(Shdr) *dynamic, *verdef;
     size_t verdefnum;
 
     ElfW(Ehdr) *ehdr = addr;
     ElfW(Shdr) *shdr = get_offset(addr, size, ehdr->e_shoff);
 
-    /* get numbers of SHT_GNU_verdef entries from .dynamic's DT_VERDEFNUM entry */
-    if ((dynamic = shdr_by_name(addr, size, ehdr, shdr, ".dynamic")) == NULL ||
-        (verdefnum = get_dyn_val(addr, size, dynamic, DT_VERDEFNUM)) == 0)
-    {
+    /* get numbers of .gnu.version_d entries from .dynamic's DT_VERDEFNUM entry */
+    ElfW(Shdr) *dynamic = get_shdr(addr, size, ehdr, shdr, SHT_DYNAMIC, ".dynamic");
+
+    if (!dynamic || (verdefnum = get_dyn_val(addr, size, dynamic, DT_VERDEFNUM)) == 0) {
         return NULL;
     }
 
     /* get link to section that holds the strings referenced
-     * by SHT_GNU_verdef section */
-    if ((verdef = shdr_by_type(shdr, ehdr->e_shnum, SHT_GNU_verdef)) == NULL ||
-        verdef->sh_link >= ehdr->e_shnum)
-    {
+     * by .gnu.version_d section */
+    ElfW(Shdr) *verdef = get_shdr(addr, size, ehdr, shdr, SHT_GNU_verdef, ".gnu.version_d");
+
+    if (!verdef || verdef->sh_link >= ehdr->e_shnum) {
         return NULL;
     }
 
     ElfW(Shdr) *strings = &shdr[verdef->sh_link];
 
-    /* parse SHT_GNU_verdef section */
+    /* parse .gnu.version_d section */
     ElfW(Off) vd_off = verdef->sh_offset;
     const char *symbol = NULL;
     const size_t pfxlen = strlen(prefix);
@@ -276,8 +268,8 @@ static char *find_symbol(void *addr, size_t size, const char *prefix)
     for (size_t i = 0; i < verdefnum; i++) {
         ElfW(Verdef) *vd = get_offset(addr, size, vd_off);
 
-        if (vd->vd_version == 1 &&             /* must be 1 */
-            vd->vd_flags != VER_FLG_BASE &&    /* skip library name entry */
+        if (vd->vd_version == 1 &&               /* must be 1 */
+            vd->vd_flags != VER_FLG_BASE &&      /* skip library name entry */
             vd->vd_aux >= sizeof(ElfW(Verdef)))  /* placed after ElfW(Verdef) array */
         {
             /* get only the latest version instead of iterating all ElfXX_Verdaux entries */

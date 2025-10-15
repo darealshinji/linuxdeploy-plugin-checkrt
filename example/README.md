@@ -10,25 +10,20 @@ GCC_PREFIX="$HOME/gcc" make
 Now run `CHECKRT_DEBUG=1 ./example-1-x86_64.AppImage`.
 The output should look similar to this:
 ```
-CHECKRT>> libstdc++.so.6 system = 3004028
-CHECKRT>> libstdc++.so.6 bundle = 3004031
-CHECKRT>> libgcc_s.so.1 system = 7000000
-CHECKRT>> libgcc_s.so.1 bundle = 13000000
-CHECKRT>> LD_LIBRARY_PATH=/tmp/.mount_examplZGsWQg/apprun-hooks/checkrt/gcc:/tmp/.mount_examplZGsWQg/apprun-hooks/checkrt/cxx:
-CHECKRT>> LD_PRELOAD=/tmp/.mount_examplZGsWQg/apprun-hooks/checkrt/exec.so:
+$ CHECKRT_DEBUG=1 ./example-1-x86_64.AppImage
+[DEBUG] get_exe_dir: exe directory found at: /tmp/.mount_examplKohcOL/checkrt
+[DEBUG] symbol_version: symbol GCC_14.0.0 found in: /tmp/.mount_examplKohcOL/checkrt/gcc/libgcc_s.so.1
+[DEBUG] get_system_library_path: libgcc_s.so.1 resolved to: /lib/x86_64-linux-gnu/libgcc_s.so.1
+[DEBUG] symbol_version: symbol GCC_14.0.0 found in: /lib/x86_64-linux-gnu/libgcc_s.so.1
+[DEBUG] use_bundled_library: use SYSTEM libgcc_s.so.1 library
+[DEBUG] symbol_version: symbol GLIBCXX_3.4.34 found in: /tmp/.mount_examplKohcOL/checkrt/cxx/libstdc++.so.6
+[DEBUG] get_system_library_path: libstdc++.so.6 resolved to: /lib/x86_64-linux-gnu/libstdc++.so.6
+[DEBUG] symbol_version: symbol GLIBCXX_3.4.33 found in: /lib/x86_64-linux-gnu/libstdc++.so.6
+[DEBUG] use_bundled_library: use BUNDLED libstdc++.so.6 library
+CHECKRT>> LD_LIBRARY_PATH=/tmp/.mount_examplKohcOL/checkrt/cxx:
+CHECKRT>> LD_PRELOAD=/tmp/.mount_examplKohcOL/checkrt/exec.so:
 hello world
 ```
 You can see that the bundled libraries are newer versions than on the system
 and have therefor been prepended to LD_LIBRARY_PATH.
 
-If the library versions are equal to or less than on your system the output
-should look like this:
-```
-CHECKRT>> libstdc++.so.6 system = 3004031
-CHECKRT>> libstdc++.so.6 bundle = 3004031
-CHECKRT>> libgcc_s.so.1 system = 13000000
-CHECKRT>> libgcc_s.so.1 bundle = 13000000
-CHECKRT>> LD_LIBRARY_PATH=
-CHECKRT>> LD_PRELOAD=/tmp/.mount_examplEwjwfp/apprun-hooks/checkrt/exec.so:
-hello world
-```
