@@ -204,12 +204,31 @@ static void *get_offset(ElfW(Off) offset)
 }
 
 
+/* value is stored in shdr[0].sh_size if it's too large */
+static size_t get_shnum() {
+    return (ehdr->e_shnum == 0) ? shdr[0].sh_size : ehdr->e_shnum;
+}
+
+
+/* value is stored in shdr[0].sh_link if it's too large */
+static size_t get_shstrndx() {
+    return (ehdr->e_shstrndx == SHN_XINDEX) ? shdr[0].sh_link : ehdr->e_shstrndx;
+}
+
+
 /* get section header by name */
 static ElfW(Shdr) *get_shdr(ElfW(Word) type, const char *name)
 {
-    ElfW(Shdr) *strtab = &shdr[ehdr->e_shstrndx];
+    size_t shnum = get_shnum();
+    size_t shstrndx = get_shstrndx();
 
-    for (size_t i = 0; i < ehdr->e_shnum; i++) {
+    if (shnum == 0 || shstrndx == 0) {
+        return NULL;
+    }
+
+    ElfW(Shdr) *strtab = &shdr[shstrndx];
+
+    for (size_t i = 1; i < shnum; i++) {
         if (shdr[i].sh_type != type) {
             continue;
         }
@@ -289,7 +308,7 @@ static char *find_symbol(const char *prefix)
      * by .gnu.version_d section */
     ElfW(Shdr) *verdef = get_shdr(SHT_GNU_verdef, ".gnu.version_d");
 
-    if (!verdef || verdef->sh_link >= ehdr->e_shnum) {
+    if (!verdef || verdef->sh_link >= get_shnum()) {
         return NULL;
     }
 
